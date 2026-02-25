@@ -50,29 +50,35 @@ pip install -r requirements.txt
 
 ### 2. Download SAM 3 Model
 
-The SAM 3 model file (`sam3.pt`) is **not included** in this repository due to its large size (~3.3 GB). It will be **downloaded automatically** on first launch by the Ultralytics library.
+The SAM 3 model file (`sam3.pt`, ~3.4 GB) is **not included** in this repository. You must **manually download** it from Hugging Face.
 
-**Automatic Download (Recommended)**:
-Simply run the tool - Ultralytics will download `sam3.pt` to the default cache directory automatically.
+**Download Steps**:
 
-**Manual Download**:
-If you prefer to download manually or have no internet on your target machine:
+1. Visit the [SAM 3 model page on Hugging Face](https://huggingface.co/facebook/sam3)
+2. **Request access** (approval required by Meta)
+3. Once approved, download `sam3.pt`:
+   - Direct link: https://huggingface.co/facebook/sam3/resolve/main/sam3.pt?download=true
+4. Place `sam3.pt` in the **project root directory** (same folder as `sam3_labeler.py`)
 
-| Model | Size | Description | Source |
-|-------|------|-------------|--------|
-| `sam3.pt` | ~3.3 GB | SAM 3 full model (recommended) | [Ultralytics SAM Docs](https://docs.ultralytics.com/models/sam/) |
-| `sam3_l.pt` | ~1.2 GB | SAM 3 large variant | [Ultralytics SAM Docs](https://docs.ultralytics.com/models/sam/) |
-| `sam3_s.pt` | ~300 MB | SAM 3 small variant (faster, less accurate) | [Ultralytics SAM Docs](https://docs.ultralytics.com/models/sam/) |
+| Model | Size | Source |
+|-------|------|--------|
+| `sam3.pt` | ~3.4 GB | [Hugging Face - facebook/sam3](https://huggingface.co/facebook/sam3) |
 
-After downloading, place the model file in the **project root directory** (same folder as `sam3_labeler.py`), or in Ultralytics default model directory:
-- Windows: `C:\Users\<username>\AppData\Roaming\Ultralytics\`
-- Linux/macOS: `~/.config/Ultralytics/`
+> **Alternative**: You can also use SAM 2 models which do **not** require access approval:
+>
+> | Model | Size | Source |
+> |-------|------|--------|
+> | `sam2_t.pt` | ~150 MB | Auto-download via Ultralytics |
+> | `sam2_s.pt` | ~180 MB | Auto-download via Ultralytics |
+> | `sam2_b.pt` | ~350 MB | Auto-download via Ultralytics |
+> | `sam2_l.pt` | ~900 MB | Auto-download via Ultralytics |
+>
+> SAM 2 models are downloaded automatically on first use. See [Ultralytics SAM 2 Docs](https://docs.ultralytics.com/models/sam-2/).
 
-You can also download via Python:
-```python
-from ultralytics import SAM
-model = SAM("sam3.pt")  # Downloads automatically
-```
+**Reference**:
+- [Ultralytics SAM 3 Docs](https://docs.ultralytics.com/models/sam-3/)
+- [Ultralytics SAM 2 Docs](https://docs.ultralytics.com/models/sam-2/)
+- [Ultralytics SAM (Original) Docs](https://docs.ultralytics.com/models/sam/)
 
 ### 3. Run
 
