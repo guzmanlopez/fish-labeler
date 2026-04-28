@@ -4,6 +4,7 @@ Preserves original load_sam3_model / load_sam_model logic
 """
 import os
 import cv2
+import torch
 import numpy as np
 from core.utils import (
     mask_to_obb, mask_to_polygon, mask_to_binary_image,
@@ -11,10 +12,21 @@ from core.utils import (
 )
 
 
+def _auto_device():
+    """Auto-detect best available compute device: CUDA > MPS > CPU"""
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
 class SAMEngine:
     """Wrapper for SAM 3 model operations"""
 
-    def __init__(self, model_path="sam3.pt", device="cuda:0"):
+    def __init__(self, model_path="sam3.pt", device=None):
+        if device is None:
+            device = _auto_device()
         self.model_path = model_path
         self.device = device
         self._predictor = None   # SAM3SemanticPredictor (for text prompts)

@@ -21,12 +21,14 @@ Welcome to SAM3 Labeler PyQt6 edition! This desktop application helps you annota
 
 | Item | Minimum | Recommended |
 |------|---------|-------------|
-| OS | Windows 10 / Ubuntu 20.04 | Windows 11 / Ubuntu 22.04 |
+| OS | Windows 10 / Ubuntu 20.04 / macOS 12+ | Windows 11 / Ubuntu 22.04 / macOS 14+ |
 | Python | 3.10 | 3.12 |
-| GPU | NVIDIA GTX 1060 (6GB) | NVIDIA RTX 3060+ (8GB+) |
-| CUDA | 11.7 | 12.1+ |
+| GPU | NVIDIA GTX 1060 (6GB) / Apple M1 | NVIDIA RTX 3060+ (8GB+) / Apple M2+ |
+| CUDA | 11.7 (macOS uses MPS, no CUDA needed) | 12.1+ |
 | RAM | 8 GB | 16 GB+ |
 | Disk | 5 GB (incl. model) | 10 GB+ |
+
+> **Cross-platform:** The application automatically detects the best compute device (CUDA GPU → Apple MPS → CPU). No manual configuration needed.
 
 ### 1.2 Installation
 

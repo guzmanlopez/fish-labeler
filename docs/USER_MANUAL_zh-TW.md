@@ -19,12 +19,14 @@
 
 | 項目 | 最低需求 | 建議配置 |
 |------|----------|----------|
-| 作業系統 | Windows 10 / Ubuntu 20.04 | Windows 11 / Ubuntu 22.04 |
+| 作業系統 | Windows 10 / Ubuntu 20.04 / macOS 12+ | Windows 11 / Ubuntu 22.04 / macOS 14+ |
 | Python | 3.10 | 3.12 |
-| GPU | NVIDIA GTX 1060 (6GB) | NVIDIA RTX 3060+ (8GB+) |
-| CUDA | 11.7 | 12.1+ |
+| GPU | NVIDIA GTX 1060 (6GB) / Apple M1 | NVIDIA RTX 3060+ (8GB+) / Apple M2+ |
+| CUDA | 11.7（macOS 免 CUDA，使用 MPS） | 12.1+ |
 | 記憶體 | 8 GB | 16 GB+ |
 | 磁碟空間 | 5 GB（含模型） | 10 GB+ |
+
+> **跨平台支援：** 程式會自動偵測最佳運算裝置（CUDA GPU → Apple MPS → CPU），無需手動設定。
 
 ### 1.2 安裝步驟
 
