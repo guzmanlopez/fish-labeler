@@ -266,9 +266,7 @@ class AnnotationCanvas(QWidget):
             p3.drawRect(self.rect())
             p3.setPen(QPen(QColor(255, 200, 50)))
             p3.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
-            p3.drawText(
-                self.rect(), Qt.AlignmentFlag.AlignCenter, "SAM inference running..."
-            )
+            p3.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "SAM inference running...")
             p3.end()
 
     # --- mouse ---
@@ -287,10 +285,7 @@ class AnnotationCanvas(QWidget):
             super().keyReleaseEvent(a0)
 
     def mousePressEvent(self, a0):
-        if (
-            a0.button() == Qt.MouseButton.MiddleButton
-            or a0.button() == Qt.MouseButton.RightButton
-        ):
+        if a0.button() == Qt.MouseButton.MiddleButton or a0.button() == Qt.MouseButton.RightButton:
             self._panning = True
             self._pan_start = a0.pos()
             self._pan_off0 = QPointF(self._offset)
@@ -332,9 +327,7 @@ class AnnotationCanvas(QWidget):
         if self._pixmap:
             ix, iy = self._w2i(a0.pos())
             self._cursor_img = (
-                (ix, iy)
-                if 0 <= ix <= self._img_w and 0 <= iy <= self._img_h
-                else (-1, -1)
+                (ix, iy) if 0 <= ix <= self._img_w and 0 <= iy <= self._img_h else (-1, -1)
             )
             self.cursor_moved.emit(ix, iy)
         if self._panning:
@@ -378,9 +371,7 @@ class AnnotationCanvas(QWidget):
         elif self._mode == "select":
             from core.utils import find_labels_in_box
 
-            for i in find_labels_in_box(
-                sx, sy, ex, ey, self._labels, self._img_w, self._img_h
-            ):
+            for i in find_labels_in_box(sx, sy, ex, ey, self._labels, self._img_w, self._img_h):
                 self._selected.add(i)
             self.label_selected.emit(-1)
         self.update()

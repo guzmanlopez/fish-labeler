@@ -83,17 +83,11 @@ class SAMEngine:
         new_labels = []
         added = skipped = 0
         for i, mask in enumerate(masks):
-            cls_idx = (
-                int(boxes.cls[i].item())
-                if boxes is not None and boxes.cls is not None
-                else 0
-            )
+            cls_idx = int(boxes.cls[i].item()) if boxes is not None and boxes.cls is not None else 0
             if cls_idx >= len(prompts):
                 cls_idx = 0
             prompt_class = prompts[min(cls_idx, len(prompts) - 1)]
-            class_id = (
-                all_classes.index(prompt_class) if prompt_class in all_classes else 0
-            )
+            class_id = all_classes.index(prompt_class) if prompt_class in all_classes else 0
 
             obb = mask_to_obb(mask, img_w, img_h)
             if obb is None:
@@ -127,9 +121,7 @@ class SAMEngine:
         temp_path = "_temp_sam_img.jpg"
         cv2.imwrite(temp_path, cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
         try:
-            results = sam.predict(
-                source=temp_path, points=[[x, y]], labels=[1], device=self.device
-            )
+            results = sam.predict(source=temp_path, points=[[x, y]], labels=[1], device=self.device)
         finally:
             if os.path.exists(temp_path):
                 os.remove(temp_path)

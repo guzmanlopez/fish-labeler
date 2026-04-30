@@ -64,9 +64,7 @@ def color_icon(color: QColor, size=12):
 
 def _section_label(text):
     lbl = QLabel(text)
-    lbl.setStyleSheet(
-        "color:#8892b0; font-size:12px; font-weight:600; padding:6px 0 2px 0;"
-    )
+    lbl.setStyleSheet("color:#8892b0; font-size:12px; font-weight:600; padding:6px 0 2px 0;")
     return lbl
 
 
@@ -178,9 +176,7 @@ class MainWindow(QMainWindow):
 
         # -- Text segmentation --
         sl.addWidget(_section_label("Text prompt:"))
-        self.text_prompt = QLineEdit(
-            self.state.classes[0] if self.state.classes else ""
-        )
+        self.text_prompt = QLineEdit(self.state.classes[0] if self.state.classes else "")
         self.text_prompt.setPlaceholderText("e.g. person,fish,glove,buoy,blood,stick")
         self.text_prompt.returnPressed.connect(self._segment_text)
         sl.addWidget(self.text_prompt)
@@ -352,9 +348,7 @@ class MainWindow(QMainWindow):
         # -- Annotation list --
         al.addWidget(_section_label("Annotations"))
         self.label_list = QListWidget()
-        self.label_list.setSelectionMode(
-            QAbstractItemView.SelectionMode.ExtendedSelection
-        )
+        self.label_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.label_list.setMaximumHeight(300)
         self.label_list.itemSelectionChanged.connect(self._on_list_selection)
         al.addWidget(self.label_list)
@@ -364,9 +358,7 @@ class MainWindow(QMainWindow):
         op1.setSpacing(4)
         self.change_combo = QComboBox()
         self.change_combo.addItems(self.state.classes)
-        self.change_combo.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
+        self.change_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         op1.addWidget(self.change_combo)
         chg_btn = QPushButton("Apply class")
         chg_btn.setToolTip(
@@ -539,9 +531,7 @@ class MainWindow(QMainWindow):
         self.state.selected_labels.clear()
 
         label_output_path = self.state.output_folder / "labels" / f"{img_path.stem}.txt"
-        label_seg_output_path = (
-            self.state.output_folder / "labels_seg" / f"{img_path.stem}.txt"
-        )
+        label_seg_output_path = self.state.output_folder / "labels_seg" / f"{img_path.stem}.txt"
         self.state.current_labels = load_existing_labels(
             label_output_path, label_seg_output_path, rgb
         )

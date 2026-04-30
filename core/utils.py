@@ -93,9 +93,7 @@ def polygon_to_mask(polygon_coords, img_width, img_height):
 # ------------------------------------------------------------------
 
 
-def check_mask_overlap(
-    new_mask, existing_labels, img_width, img_height, threshold=None
-):
+def check_mask_overlap(new_mask, existing_labels, img_width, img_height, threshold=None):
     """Check if new mask overlaps with existing annotations"""
     if new_mask is None:
         return False, None, 0
@@ -107,9 +105,7 @@ def check_mask_overlap(
     if len(new_mask.shape) == 3:
         new_mask = new_mask[0]
     if new_mask.shape != (img_height, img_width):
-        new_mask = cv2.resize(
-            new_mask, (img_width, img_height), interpolation=cv2.INTER_NEAREST
-        )
+        new_mask = cv2.resize(new_mask, (img_width, img_height), interpolation=cv2.INTER_NEAREST)
     new_mask_binary = new_mask > 0
     new_mask_area = new_mask_binary.sum()
     if new_mask_area == 0:
@@ -227,9 +223,7 @@ def find_labels_in_box(x1, y1, x2, y2, labels, img_w, img_h):
 # ------------------------------------------------------------------
 
 
-def create_coco_annotation(
-    ann_id, image_id, category_id, polygon_coords, img_width, img_height
-):
+def create_coco_annotation(ann_id, image_id, category_id, polygon_coords, img_width, img_height):
     """Create a single COCO annotation object"""
     segmentation = []
     for i in range(0, len(polygon_coords), 2):
@@ -270,9 +264,7 @@ def create_coco_dataset(image_list, labels_dict, classes, output_path):
         "categories": [],
     }
     for idx, class_name in enumerate(classes):
-        coco_data["categories"].append(
-            {"id": idx, "name": class_name, "supercategory": "object"}
-        )
+        coco_data["categories"].append({"id": idx, "name": class_name, "supercategory": "object"})
 
     ann_id = 1
     for img_id, img_path in enumerate(image_list):

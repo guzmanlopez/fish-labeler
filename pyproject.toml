@@ -1,0 +1,25 @@
+[project]
+name = "fish-labeler"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=1.24.0",
+    "opencv-python>=4.8.0",
+    "pyqt6>=6.6.0",
+    "ultralytics>=8.3.237",
+]
+
+[dependency-groups]
+dev = [
+    "complexipy>=5.4.0",
+    "detect-secrets>=1.5.0",
+    "docstr-coverage>=2.3.2",
+    "ipykernel>=7.2.0",
+    "pre-commit>=4.6.0",
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.12",
+    "ty>=0.0.33",
+]
