@@ -23,6 +23,7 @@ DEFAULT_CONFIG = {
 
 
 def load_config():
+    """Docstring for load_config."""
     try:
         if CONFIG_FILE.exists():
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -34,6 +35,7 @@ def load_config():
 
 
 def save_config(images_folder=None, output_folder=None):
+    """Docstring for save_config."""
     try:
         config = load_config()
         if images_folder:
@@ -47,6 +49,7 @@ def save_config(images_folder=None, output_folder=None):
 
 
 def save_progress(folder_path, index, image_list):
+    """Docstring for save_progress."""
     try:
         progress = {}
         if PROGRESS_FILE.exists():
@@ -64,6 +67,7 @@ def save_progress(folder_path, index, image_list):
 
 
 def load_progress(folder_path):
+    """Docstring for load_progress."""
     try:
         if not PROGRESS_FILE.exists():
             return 0
@@ -79,6 +83,7 @@ def load_progress(folder_path):
 
 
 def persist_classes(classes):
+    """Docstring for persist_classes."""
     try:
         with open(CLASSES_STORE, "w", encoding="utf-8") as f:
             for c in classes:
@@ -88,6 +93,7 @@ def persist_classes(classes):
 
 
 def load_persisted_classes():
+    """Docstring for load_persisted_classes."""
     try:
         with open(CLASSES_STORE, "r", encoding="utf-8") as f:
             lines = [line.strip() for line in f if line.strip()]
@@ -100,6 +106,7 @@ def load_persisted_classes():
 
 
 def load_existing_labels(label_path, seg_label_path, current_image):
+    """Docstring for load_existing_labels."""
     """Load existing annotations, returns labels list"""
     labels = []
     img_h, img_w = current_image.shape[:2]
@@ -115,7 +122,9 @@ def load_existing_labels(label_path, seg_label_path, current_image):
                     mask = polygon_to_mask(polygon_coords, img_w, img_h)
                     obb_coords = mask_to_obb(mask, img_w, img_h)
                     if obb_coords:
-                        labels.append((class_id, obb_coords, polygon_coords, mask))
+                        labels.append(
+                            (class_id, obb_coords, polygon_coords, mask, None)
+                        )
         return labels
 
     # OBB format (backward compatible)
@@ -127,11 +136,12 @@ def load_existing_labels(label_path, seg_label_path, current_image):
                     class_id = int(parts[0])
                     coords = [float(x) for x in parts[1:]]
                     mask = polygon_to_mask(coords, img_w, img_h)
-                    labels.append((class_id, coords, coords, mask))
+                    labels.append((class_id, coords, coords, mask, None))
     return labels
 
 
 def auto_save_labels(state):
+    """Docstring for auto_save_labels."""
     """Auto-save annotations with multi-format output. Preserves original logic."""
     if state.current_image is None or state.current_image_path is None:
         return None
@@ -169,7 +179,7 @@ def auto_save_labels(state):
     saved = []
 
     # OBB
-    if state.output_formats.get("obb", True):
+    if state.output_formats.get("obb", False):
         d = output_path / "labels"
         d.mkdir(parents=True, exist_ok=True)
         with open(d / f"{img_stem}.txt", "w") as f:

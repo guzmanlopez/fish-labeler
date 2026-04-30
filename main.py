@@ -18,7 +18,7 @@ from ui.main_window import MainWindow
 
 
 def main():
-    parser = argparse.ArgumentParser(description="SAM3 Labeler (PyQt6)")
+    parser = argparse.ArgumentParser(description="Fish Labeler (PyQt6)")
     parser.add_argument("--model", default="sam3.pt", help="SAM 3 model path")
     parser.add_argument("--images", default=None, help="Image folder path")
     parser.add_argument("--output", default=None, help="Output folder path")
@@ -42,11 +42,13 @@ def main():
 
     window.showMaximized()
 
-    print("=" * 90)
-    print("SAM3 Labeler — PyQt6 Edition")
-    print("Shortcuts: Left/Right switch images | Del delete | Ctrl+S save")
-    print("Scroll to zoom | Real-time hover highlight")
-    print("=" * 90)
+    from core.logger import logger
+
+    logger.info("=" * 90)
+    logger.info("Fish Labeler — PyQt6 Edition")
+    logger.info("Shortcuts: Left/Right switch images | Del delete | Ctrl+S save")
+    logger.info("Scroll to zoom | Real-time hover highlight")
+    logger.info("=" * 90)
 
     sys.exit(app.exec())
 

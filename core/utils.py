@@ -16,6 +16,7 @@ import numpy as np
 
 
 def mask_to_obb(mask, img_width, img_height):
+    """Docstring for mask_to_obb."""
     """Convert binary mask to OBB coordinates"""
     if hasattr(mask, "cpu"):
         mask = mask.cpu().numpy()
@@ -40,6 +41,7 @@ def mask_to_obb(mask, img_width, img_height):
 
 
 def mask_to_polygon(mask, img_width, img_height, epsilon_ratio=0.005):
+    """Docstring for mask_to_polygon."""
     """Convert binary mask to polygon coordinates (YOLO-Seg format)"""
     if hasattr(mask, "cpu"):
         mask = mask.cpu().numpy()
@@ -66,6 +68,7 @@ def mask_to_polygon(mask, img_width, img_height, epsilon_ratio=0.005):
 
 
 def mask_to_binary_image(mask):
+    """Docstring for mask_to_binary_image."""
     """Convert mask to binary image (0 or 255)"""
     if hasattr(mask, "cpu"):
         mask = mask.cpu().numpy()
@@ -76,6 +79,7 @@ def mask_to_binary_image(mask):
 
 
 def polygon_to_mask(polygon_coords, img_width, img_height):
+    """Docstring for polygon_to_mask."""
     """Convert polygon coordinates back to mask image"""
     points = []
     for i in range(0, len(polygon_coords), 2):
@@ -93,7 +97,10 @@ def polygon_to_mask(polygon_coords, img_width, img_height):
 # ------------------------------------------------------------------
 
 
-def check_mask_overlap(new_mask, existing_labels, img_width, img_height, threshold=None):
+def check_mask_overlap(
+    new_mask, existing_labels, img_width, img_height, threshold=None
+):
+    """Docstring for check_mask_overlap."""
     """Check if new mask overlaps with existing annotations"""
     if new_mask is None:
         return False, None, 0
@@ -105,7 +112,9 @@ def check_mask_overlap(new_mask, existing_labels, img_width, img_height, thresho
     if len(new_mask.shape) == 3:
         new_mask = new_mask[0]
     if new_mask.shape != (img_height, img_width):
-        new_mask = cv2.resize(new_mask, (img_width, img_height), interpolation=cv2.INTER_NEAREST)
+        new_mask = cv2.resize(
+            new_mask, (img_width, img_height), interpolation=cv2.INTER_NEAREST
+        )
     new_mask_binary = new_mask > 0
     new_mask_area = new_mask_binary.sum()
     if new_mask_area == 0:
@@ -139,6 +148,7 @@ def check_mask_overlap(new_mask, existing_labels, img_width, img_height, thresho
 
 
 def box_to_obb(x1, y1, x2, y2, img_w, img_h):
+    """Docstring for box_to_obb."""
     """Convert bounding box to axis-aligned OBB coordinates"""
     if img_w <= 0 or img_h <= 0:
         return None
@@ -165,7 +175,20 @@ def box_to_obb(x1, y1, x2, y2, img_w, img_h):
     return normalized_box
 
 
+def point_in_aabb(x, y, obb_coords, img_w, img_h):
+    """Check if point (x, y) is inside AABB derived from OBB."""
+    points_x = []
+    points_y = []
+    for i in range(0, 8, 2):
+        points_x.append(int(obb_coords[i] * img_w))
+        points_y.append(int(obb_coords[i + 1] * img_h))
+    min_x, max_x = min(points_x), max(points_x)
+    min_y, max_y = min(points_y), max(points_y)
+    return min_x <= x <= max_x and min_y <= y <= max_y
+
+
 def point_in_obb(x, y, obb_coords, img_w, img_h):
+    """Docstring for point_in_obb."""
     """Check if point (x, y) is inside OBB"""
     points = []
     for i in range(0, 8, 2):
@@ -178,6 +201,7 @@ def point_in_obb(x, y, obb_coords, img_w, img_h):
 
 
 def find_clicked_label(x, y, labels, img_w, img_h):
+    """Docstring for find_clicked_label."""
     """Find annotation index at click position"""
     clicked_indices = []
     for idx, label in enumerate(labels):
@@ -190,6 +214,7 @@ def find_clicked_label(x, y, labels, img_w, img_h):
 
 
 def obb_intersects_box(obb_coords, box_x1, box_y1, box_x2, box_y2, img_w, img_h):
+    """Docstring for obb_intersects_box."""
     """Check if OBB intersects or is contained within bounding box"""
     obb_points = []
     for i in range(0, 8, 2):
@@ -207,6 +232,7 @@ def obb_intersects_box(obb_coords, box_x1, box_y1, box_x2, box_y2, img_w, img_h)
 
 
 def find_labels_in_box(x1, y1, x2, y2, labels, img_w, img_h):
+    """Docstring for find_labels_in_box."""
     """Find all annotation indices within box selection"""
     box_x1, box_x2 = min(x1, x2), max(x1, x2)
     box_y1, box_y2 = min(y1, y2), max(y1, y2)
@@ -223,7 +249,10 @@ def find_labels_in_box(x1, y1, x2, y2, labels, img_w, img_h):
 # ------------------------------------------------------------------
 
 
-def create_coco_annotation(ann_id, image_id, category_id, polygon_coords, img_width, img_height):
+def create_coco_annotation(
+    ann_id, image_id, category_id, polygon_coords, img_width, img_height
+):
+    """Docstring for create_coco_annotation."""
     """Create a single COCO annotation object"""
     segmentation = []
     for i in range(0, len(polygon_coords), 2):
@@ -255,6 +284,7 @@ def create_coco_annotation(ann_id, image_id, category_id, polygon_coords, img_wi
 
 
 def create_coco_dataset(image_list, labels_dict, classes, output_path):
+    """Docstring for create_coco_dataset."""
     """Create complete COCO dataset JSON"""
     coco_data = {
         "info": {"description": "SAM3 Labeler Dataset", "version": "1.0", "year": 2026},
@@ -264,7 +294,9 @@ def create_coco_dataset(image_list, labels_dict, classes, output_path):
         "categories": [],
     }
     for idx, class_name in enumerate(classes):
-        coco_data["categories"].append({"id": idx, "name": class_name, "supercategory": "object"})
+        coco_data["categories"].append(
+            {"id": idx, "name": class_name, "supercategory": "object"}
+        )
 
     ann_id = 1
     for img_id, img_path in enumerate(image_list):

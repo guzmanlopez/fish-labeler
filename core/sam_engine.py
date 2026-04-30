@@ -7,6 +7,7 @@ import os
 
 import cv2
 
+from core.logger import logger
 from core.utils import (
     box_to_obb,
     check_mask_overlap,
@@ -16,38 +17,44 @@ from core.utils import (
     polygon_to_mask,
 )
 
+DEFAULT_SAM_CONF = 0.25
+
 
 class SAMEngine:
+    """SAMEngine class."""
     """Wrapper for SAM 3 model operations"""
 
     def __init__(self, model_path="sam3.pt", device="cuda:0"):
+        """Docstring for __init__."""
         self.model_path = model_path
         self.device = device
         self._predictor = None  # SAM3SemanticPredictor (for text prompts)
         self._sam_model = None  # SAM model (for click/box)
 
     def _ensure_predictor(self):
+        """Docstring for _ensure_predictor."""
         if self._predictor is None:
             from ultralytics.models.sam import SAM3SemanticPredictor
 
             self._predictor = SAM3SemanticPredictor(
                 overrides=dict(
-                    conf=0.5,
+                    conf=DEFAULT_SAM_CONF,
                     model=self.model_path,
                     device=self.device,
                     half=True,
                     verbose=False,
                 )
             )
-            print(f"[OK] SAM 3 semantic model loaded ({self.device})")
+            logger.info(f"[OK] SAM 3 semantic model loaded ({self.device})")
         return self._predictor
 
     def _ensure_sam(self):
+        """Docstring for _ensure_sam."""
         if self._sam_model is None:
             from ultralytics import SAM
 
             self._sam_model = SAM(self.model_path)
-            print(f"[OK] SAM click/box model loaded ({self.device})")
+            logger.info(f"[OK] SAM click/box model loaded ({self.device})")
         return self._sam_model
 
     def segment_text(
@@ -83,11 +90,23 @@ class SAMEngine:
         new_labels = []
         added = skipped = 0
         for i, mask in enumerate(masks):
-            cls_idx = int(boxes.cls[i].item()) if boxes is not None and boxes.cls is not None else 0
+            cls_idx = (
+                int(boxes.cls[i].item())
+                if boxes is not None and boxes.cls is not None
+                else 0
+            )
             if cls_idx >= len(prompts):
                 cls_idx = 0
             prompt_class = prompts[min(cls_idx, len(prompts) - 1)]
-            class_id = all_classes.index(prompt_class) if prompt_class in all_classes else 0
+            class_id = (
+                all_classes.index(prompt_class) if prompt_class in all_classes else 0
+            )
+
+            conf = (
+                float(boxes.conf[i].item())
+                if boxes is not None and boxes.conf is not None
+                else 1.0
+            )
 
             obb = mask_to_obb(mask, img_w, img_h)
             if obb is None:
@@ -101,7 +120,7 @@ class SAMEngine:
             if is_over:
                 skipped += 1
                 continue
-            new_labels.append((class_id, obb, poly, mb))
+            new_labels.append((class_id, obb, poly, mb, conf))
             added += 1
 
         return new_labels, added, skipped, new_classes
@@ -121,7 +140,9 @@ class SAMEngine:
         temp_path = "_temp_sam_img.jpg"
         cv2.imwrite(temp_path, cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
         try:
-            results = sam.predict(source=temp_path, points=[[x, y]], labels=[1], device=self.device)
+            results = sam.predict(
+                source=temp_path, points=[[x, y]], labels=[1], device=self.device
+            )
         finally:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
@@ -146,7 +167,7 @@ class SAMEngine:
         if is_over:
             return None, f"Overlaps with annotation {oidx + 1} ({oratio * 100:.0f}%)"
 
-        return (class_id, obb, poly, mb), f"Object detected at ({x}, {y})"
+        return (class_id, obb, poly, mb, 1.0), f"Object detected at ({x}, {y})"
 
     def segment_box(
         self,
@@ -194,7 +215,7 @@ class SAMEngine:
                             None,
                             f"Overlaps with annotation {oidx + 1} ({oratio * 100:.0f}%)",
                         )
-                    return (class_id, obb, poly, mb), "SAM detected object"
+                    return (class_id, obb, poly, mb, 1.0), "SAM detected object"
 
         # fallback to box
         if fallback_to_box:
@@ -213,6 +234,6 @@ class SAMEngine:
                     None,
                     f"Overlaps with annotation {oidx + 1} ({oratio * 100:.0f}%)",
                 )
-            return (class_id, obb, poly, mb), "Box annotation created (fallback)"
+            return (class_id, obb, poly, mb, 1.0), "Box annotation created (fallback)"
 
         return None, "SAM did not detect any object"
