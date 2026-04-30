@@ -97,41 +97,24 @@ def polygon_to_mask(polygon_coords, img_width, img_height):
 # ------------------------------------------------------------------
 
 
-def check_mask_overlap(
-    new_mask, existing_labels, img_width, img_height, threshold=None
-):
+def check_mask_overlap(new_mask, existing_labels, img_width, img_height, threshold=None):
     """Docstring for check_mask_overlap."""
     """Check if new mask overlaps with existing annotations"""
     if new_mask is None:
         return False, None, 0
     if threshold is not None and threshold <= 0:
         return False, None, 0
-    if hasattr(new_mask, "cpu"):
-        new_mask = new_mask.cpu().numpy()
-    new_mask = new_mask.astype(np.uint8)
-    if len(new_mask.shape) == 3:
-        new_mask = new_mask[0]
-    if new_mask.shape != (img_height, img_width):
-        new_mask = cv2.resize(
-            new_mask, (img_width, img_height), interpolation=cv2.INTER_NEAREST
-        )
+
+    new_mask = _normalize_overlap_mask(new_mask, img_width, img_height)
     new_mask_binary = new_mask > 0
     new_mask_area = new_mask_binary.sum()
     if new_mask_area == 0:
         return False, None, 0
 
     for idx, label in enumerate(existing_labels):
-        existing_mask = label[3] if len(label) > 3 and label[3] is not None else None
-        if existing_mask is None:
-            polygon_coords = label[2] if len(label) > 2 and label[2] else label[1]
-            if polygon_coords:
-                existing_mask = polygon_to_mask(polygon_coords, img_width, img_height)
+        existing_mask = _label_overlap_mask(label, img_width, img_height)
         if existing_mask is None:
             continue
-        if existing_mask.shape != (img_height, img_width):
-            existing_mask = cv2.resize(
-                existing_mask, (img_width, img_height), interpolation=cv2.INTER_NEAREST
-            )
         existing_mask_binary = existing_mask > 0
         intersection = np.logical_and(new_mask_binary, existing_mask_binary)
         intersection_area = intersection.sum()
@@ -140,6 +123,30 @@ def check_mask_overlap(
             if threshold is not None and overlap_ratio > threshold:
                 return True, idx, overlap_ratio
     return False, None, 0
+
+
+def _normalize_overlap_mask(mask, img_width, img_height):
+    """Return a mask resized to the working image size for overlap checks."""
+    if hasattr(mask, "cpu"):
+        mask = mask.cpu().numpy()
+    mask = mask.astype(np.uint8)
+    if len(mask.shape) == 3:
+        mask = mask[0]
+    if mask.shape != (img_height, img_width):
+        mask = cv2.resize(mask, (img_width, img_height), interpolation=cv2.INTER_NEAREST)
+    return mask
+
+
+def _label_overlap_mask(label, img_width, img_height):
+    """Build the overlap mask for a stored label."""
+    existing_mask = label[3] if len(label) > 3 and label[3] is not None else None
+    if existing_mask is None:
+        polygon_coords = label[2] if len(label) > 2 and label[2] else label[1]
+        if polygon_coords:
+            existing_mask = polygon_to_mask(polygon_coords, img_width, img_height)
+    if existing_mask is None:
+        return None
+    return _normalize_overlap_mask(existing_mask, img_width, img_height)
 
 
 # ------------------------------------------------------------------
@@ -249,9 +256,7 @@ def find_labels_in_box(x1, y1, x2, y2, labels, img_w, img_h):
 # ------------------------------------------------------------------
 
 
-def create_coco_annotation(
-    ann_id, image_id, category_id, polygon_coords, img_width, img_height
-):
+def create_coco_annotation(ann_id, image_id, category_id, polygon_coords, img_width, img_height):
     """Docstring for create_coco_annotation."""
     """Create a single COCO annotation object"""
     segmentation = []
@@ -294,9 +299,7 @@ def create_coco_dataset(image_list, labels_dict, classes, output_path):
         "categories": [],
     }
     for idx, class_name in enumerate(classes):
-        coco_data["categories"].append(
-            {"id": idx, "name": class_name, "supercategory": "object"}
-        )
+        coco_data["categories"].append({"id": idx, "name": class_name, "supercategory": "object"})
 
     ann_id = 1
     for img_id, img_path in enumerate(image_list):

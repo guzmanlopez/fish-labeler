@@ -15,6 +15,7 @@ from .utils import mask_to_obb, polygon_to_mask
 CLASSES_STORE = Path(__file__).resolve().parent.parent / "sam3_classes.txt"
 PROGRESS_FILE = Path(__file__).resolve().parent.parent / "sam3_progress.json"
 CONFIG_FILE = Path(__file__).resolve().parent.parent / "sam3_config.json"
+TRACKS_FILE_NAME = "tracks.json"
 
 DEFAULT_CONFIG = {
     "images_folder": "./sample_images",
@@ -105,39 +106,144 @@ def load_persisted_classes():
         return ["fish"]
 
 
+def _load_segmentation_labels(seg_label_path, img_w, img_h):
+    """Load labels from a YOLO segmentation file."""
+    labels = []
+    with open(seg_label_path) as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) < 7:
+                continue
+            class_id = int(parts[0])
+            polygon_coords = [float(x) for x in parts[1:]]
+            mask = polygon_to_mask(polygon_coords, img_w, img_h)
+            obb_coords = mask_to_obb(mask, img_w, img_h)
+            if obb_coords:
+                labels.append((class_id, obb_coords, polygon_coords, mask, None))
+    return labels
+
+
+def _load_obb_labels(label_path, img_w, img_h):
+    """Load labels from the legacy OBB text format."""
+    labels = []
+    with open(label_path) as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) != 9:
+                continue
+            class_id = int(parts[0])
+            coords = [float(x) for x in parts[1:]]
+            mask = polygon_to_mask(coords, img_w, img_h)
+            labels.append((class_id, coords, coords, mask, None))
+    return labels
+
+
 def load_existing_labels(label_path, seg_label_path, current_image):
     """Docstring for load_existing_labels."""
     """Load existing annotations, returns labels list"""
-    labels = []
     img_h, img_w = current_image.shape[:2]
 
-    # Prefer YOLO-Seg format
     if seg_label_path and seg_label_path.exists():
-        with open(seg_label_path, "r") as f:
-            for line in f:
-                parts = line.strip().split()
-                if len(parts) >= 7:
-                    class_id = int(parts[0])
-                    polygon_coords = [float(x) for x in parts[1:]]
-                    mask = polygon_to_mask(polygon_coords, img_w, img_h)
-                    obb_coords = mask_to_obb(mask, img_w, img_h)
-                    if obb_coords:
-                        labels.append(
-                            (class_id, obb_coords, polygon_coords, mask, None)
-                        )
-        return labels
+        return _load_segmentation_labels(seg_label_path, img_w, img_h)
 
-    # OBB format (backward compatible)
     if label_path and label_path.exists():
-        with open(label_path, "r") as f:
-            for line in f:
-                parts = line.strip().split()
-                if len(parts) == 9:
-                    class_id = int(parts[0])
-                    coords = [float(x) for x in parts[1:]]
-                    mask = polygon_to_mask(coords, img_w, img_h)
-                    labels.append((class_id, coords, coords, mask, None))
-    return labels
+        return _load_obb_labels(label_path, img_w, img_h)
+    return []
+
+
+def label_is_visible(label, classes, class_thresholds, default_threshold=0.25):
+    """Return whether a label passes the current class-threshold filters."""
+    if not label:
+        return False
+    class_id = int(label[0])
+    class_name = classes[class_id] if 0 <= class_id < len(classes) else f"c{class_id}"
+    score = label[4] if len(label) > 4 else None
+    if score is None:
+        return True
+    return score >= class_thresholds.get(class_name, default_threshold)
+
+
+def get_visible_labels(labels, classes, class_thresholds, default_threshold=0.25):
+    """Return only the labels currently shown by the UI threshold filters."""
+    return [
+        label
+        for label in labels
+        if label_is_visible(label, classes, class_thresholds, default_threshold)
+    ]
+
+
+def _delete_annotation_files(output_path, img_stem):
+    """Delete persisted annotation artifacts for a frame when no labels remain."""
+    deleted = []
+    for subfolder, extension, name in [
+        ("labels", ".txt", "OBB"),
+        ("labels_seg", ".txt", "Seg"),
+        ("masks", ".png", "Mask"),
+    ]:
+        path = output_path / subfolder / f"{img_stem}{extension}"
+        if path.exists():
+            path.unlink()
+            deleted.append(name)
+    return deleted
+
+
+def _copy_frame_image(output_path, current_image_path):
+    """Copy the current frame image into the export folder when needed."""
+    images_folder = output_path / "images"
+    images_folder.mkdir(parents=True, exist_ok=True)
+    dst_image_path = images_folder / current_image_path.name
+    if not dst_image_path.exists() or current_image_path.resolve() != dst_image_path.resolve():
+        try:
+            shutil.copy2(current_image_path, dst_image_path)
+        except shutil.SameFileError:
+            pass
+
+
+def _save_obb_labels(output_path, img_stem, labels):
+    """Write OBB label text output."""
+    folder = output_path / "labels"
+    folder.mkdir(parents=True, exist_ok=True)
+    with open(folder / f"{img_stem}.txt", "w") as f:
+        for label in labels:
+            coords_str = " ".join(f"{coord:.6f}" for coord in label[1])
+            f.write(f"{label[0]} {coords_str}\n")
+
+
+def _save_segmentation_labels(output_path, img_stem, labels):
+    """Write polygon segmentation label text output."""
+    folder = output_path / "labels_seg"
+    folder.mkdir(parents=True, exist_ok=True)
+    with open(folder / f"{img_stem}.txt", "w") as f:
+        for label in labels:
+            polygon = label[2] if len(label) > 2 and label[2] else label[1]
+            if polygon:
+                coords_str = " ".join(f"{coord:.6f}" for coord in polygon)
+                f.write(f"{label[0]} {coords_str}\n")
+
+
+def _save_mask_image(output_path, img_stem, image_shape, labels):
+    """Write the indexed mask export for the visible labels."""
+    folder = output_path / "masks"
+    folder.mkdir(parents=True, exist_ok=True)
+    img_h, img_w = image_shape[:2]
+    combined = np.zeros((img_h, img_w), dtype=np.uint8)
+    for index, label in enumerate(labels):
+        mask_binary = label[3] if len(label) > 3 and label[3] is not None else None
+        if mask_binary is None:
+            continue
+        if mask_binary.shape != (img_h, img_w):
+            mask_binary = cv2.resize(mask_binary, (img_w, img_h), interpolation=cv2.INTER_NEAREST)
+        combined[mask_binary > 0] = index + 1
+    cv2.imwrite(str(folder / f"{img_stem}.png"), combined)
+
+
+def _write_classes_file(output_path, classes):
+    """Persist the current class list alongside saved labels."""
+    classes_file = output_path / "classes.txt"
+    with open(classes_file, "w", encoding="utf-8") as f:
+        for class_name in classes:
+            f.write(f"{class_name}\n")
+    persist_classes(classes)
 
 
 def auto_save_labels(state):
@@ -148,78 +254,71 @@ def auto_save_labels(state):
 
     output_path = state.output_folder
     img_stem = state.current_image_path.stem
+    visible_labels = get_visible_labels(
+        state.current_labels,
+        state.classes,
+        state.class_thresholds,
+    )
 
-    # No annotations -> delete files
-    if not state.current_labels:
-        deleted = []
-        for sub, ext, name in [
-            ("labels", ".txt", "OBB"),
-            ("labels_seg", ".txt", "Seg"),
-            ("masks", ".png", "Mask"),
-        ]:
-            p = output_path / sub / f"{img_stem}{ext}"
-            if p.exists():
-                p.unlink()
-                deleted.append(name)
+    if not visible_labels:
+        deleted = _delete_annotation_files(output_path, img_stem)
         return f"Deleted ({', '.join(deleted)})" if deleted else None
 
-    # Has annotations -> save
-    images_folder = output_path / "images"
-    images_folder.mkdir(parents=True, exist_ok=True)
-    dst_image_path = images_folder / state.current_image_path.name
-    if (
-        not dst_image_path.exists()
-        or state.current_image_path.resolve() != dst_image_path.resolve()
-    ):
-        try:
-            shutil.copy2(state.current_image_path, dst_image_path)
-        except shutil.SameFileError:
-            pass
+    _copy_frame_image(output_path, state.current_image_path)
 
     saved = []
 
-    # OBB
     if state.output_formats.get("obb", False):
-        d = output_path / "labels"
-        d.mkdir(parents=True, exist_ok=True)
-        with open(d / f"{img_stem}.txt", "w") as f:
-            for label in state.current_labels:
-                coords_str = " ".join(f"{c:.6f}" for c in label[1])
-                f.write(f"{label[0]} {coords_str}\n")
+        _save_obb_labels(output_path, img_stem, visible_labels)
         saved.append("OBB")
 
-    # Seg
     if state.output_formats.get("seg", True):
-        d = output_path / "labels_seg"
-        d.mkdir(parents=True, exist_ok=True)
-        with open(d / f"{img_stem}.txt", "w") as f:
-            for label in state.current_labels:
-                poly = label[2] if len(label) > 2 and label[2] else label[1]
-                if poly:
-                    coords_str = " ".join(f"{c:.6f}" for c in poly)
-                    f.write(f"{label[0]} {coords_str}\n")
+        _save_segmentation_labels(output_path, img_stem, visible_labels)
         saved.append("Seg")
 
-    # Mask
     if state.output_formats.get("mask", False):
-        d = output_path / "masks"
-        d.mkdir(parents=True, exist_ok=True)
-        img_h, img_w = state.current_image.shape[:2]
-        combined = np.zeros((img_h, img_w), dtype=np.uint8)
-        for idx, label in enumerate(state.current_labels):
-            mb = label[3] if len(label) > 3 and label[3] is not None else None
-            if mb is not None:
-                if mb.shape != (img_h, img_w):
-                    mb = cv2.resize(mb, (img_w, img_h), interpolation=cv2.INTER_NEAREST)
-                combined[mb > 0] = idx + 1
-        cv2.imwrite(str(d / f"{img_stem}.png"), combined)
+        _save_mask_image(output_path, img_stem, state.current_image.shape, visible_labels)
         saved.append("Mask")
 
-    # classes.txt
-    classes_file = output_path / "classes.txt"
-    with open(classes_file, "w", encoding="utf-8") as f:
-        for c in state.classes:
-            f.write(f"{c}\n")
-    persist_classes(state.classes)
+    _write_classes_file(output_path, state.classes)
 
-    return f"Saved {len(state.current_labels)} annotations ({'+'.join(saved)})"
+    return f"Saved {len(visible_labels)} annotations ({'+'.join(saved)})"
+
+
+def load_tracking_data(output_folder):
+    """Load persisted tracking assignments and tracker configuration."""
+    tracks_file = Path(output_folder) / TRACKS_FILE_NAME
+    if not tracks_file.exists():
+        return {"frame_track_ids": {}, "tracks": {}, "config": {}}
+    try:
+        with open(tracks_file, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        tracks = {
+            int(track_id): track_data for track_id, track_data in payload.get("tracks", {}).items()
+        }
+        return {
+            "frame_track_ids": payload.get("frame_track_ids", {}),
+            "tracks": tracks,
+            "config": payload.get("config", {}),
+        }
+    except Exception as e:
+        print(f"Failed to load tracking data: {e}")
+        return {"frame_track_ids": {}, "tracks": {}, "config": {}}
+
+
+def save_tracking_data(output_folder, frame_track_ids, tracks, config):
+    """Persist tracking assignments and summary metadata next to the labels."""
+    output_path = Path(output_folder)
+    output_path.mkdir(parents=True, exist_ok=True)
+    tracks_file = output_path / TRACKS_FILE_NAME
+    serializable_tracks = {str(track_id): track for track_id, track in tracks.items()}
+    payload = {
+        "frame_track_ids": frame_track_ids,
+        "tracks": serializable_tracks,
+        "config": config,
+    }
+    try:
+        with open(tracks_file, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Failed to save tracking data: {e}")

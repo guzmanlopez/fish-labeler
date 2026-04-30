@@ -1,6 +1,7 @@
 import logging
 from core.logger import get_logger
 
+
 def test_get_logger():
     """Test logger initialization and singleton handler."""
     logger1 = get_logger("test_logger")

@@ -42,6 +42,7 @@ LABEL_COLORS = [
 ]
 SELECTED_COLOR = QColor(0, 255, 255)
 BG_COLOR = QColor(15, 15, 26)
+CANVAS_ICON_EXCLUSIONS = {"person", "buoy"}
 
 _icon_cache = {}
 
@@ -50,6 +51,14 @@ def icon_asset_exists(class_name: str) -> bool:
     """Return whether a class has a dedicated icon asset on disk."""
     norm_name = class_name.lower().strip().replace(" ", "_")
     return (Path("themes/icons") / f"{norm_name}.png").exists()
+
+
+def has_canvas_label_icon(class_name: str) -> bool:
+    """Return whether the canvas should render an icon for a class label."""
+    norm_name = class_name.lower().strip().replace(" ", "_")
+    if norm_name in CANVAS_ICON_EXCLUSIONS:
+        return False
+    return icon_asset_exists(class_name)
 
 
 def get_class_pixmap(class_name: str) -> QPixmap | None:
@@ -117,7 +126,7 @@ class AnnotationCanvas(QWidget):
         self.class_thresholds = {}
         self._display_mode = "both"
         self._mask_overlay = None
-        self._mode = "click"
+        self._mode = "point"
         self._dragging = False
         self._panning = False
         self._drag_start = QPoint()
@@ -131,6 +140,8 @@ class AnnotationCanvas(QWidget):
         self._busy = False
         self._space_held = False
         self.mask_opacity = 0.62
+        self._positive_prompt_points = []
+        self._negative_prompt_points = []
 
     # --- public ---
     def set_image(self, img_rgb):
@@ -165,6 +176,12 @@ class AnnotationCanvas(QWidget):
         """Docstring for set_display_mode."""
         self._display_mode = m
         self._mask_overlay = None
+        self.update()
+
+    def set_prompt_points(self, positive_points, negative_points):
+        """Update the temporary positive and negative point prompts shown on canvas."""
+        self._positive_prompt_points = [tuple(point) for point in positive_points]
+        self._negative_prompt_points = [tuple(point) for point in negative_points]
         self.update()
 
     def set_mask_opacity(self, opacity):
@@ -205,7 +222,7 @@ class AnnotationCanvas(QWidget):
         """Docstring for _upd_cursor."""
         if self._busy:
             self.setCursor(Qt.CursorShape.WaitCursor)
-        elif self._mode in ("box", "click"):
+        elif self._mode in ("box", "point", "click"):
             self.setCursor(Qt.CursorShape.CrossCursor)
         else:
             self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -224,9 +241,7 @@ class AnnotationCanvas(QWidget):
             cn = self._classes[cid] if cid < len(self._classes) else ""
             score = lb[4] if len(lb) > 4 else None
 
-            if score is not None and score < getattr(self, "class_thresholds", {}).get(
-                cn, 0.25
-            ):
+            if score is not None and score < getattr(self, "class_thresholds", {}).get(cn, 0.25):
                 continue
 
             co = LABEL_COLORS[cid % len(LABEL_COLORS)]
@@ -238,186 +253,312 @@ class AnnotationCanvas(QWidget):
                 poly.append(QPointF(pc[i] * self._img_w, pc[i + 1] * self._img_h))
             fc = QColor(SELECTED_COLOR if idx in self._selected else co)
             base_alpha = int(round(255 * self.mask_opacity))
-            fc.setAlpha(
-                min(255, base_alpha + 48) if idx in self._selected else base_alpha
-            )
+            fc.setAlpha(min(255, base_alpha + 48) if idx in self._selected else base_alpha)
             p.setBrush(QBrush(fc))
             p.setPen(Qt.PenStyle.NoPen)
             p.drawPolygon(poly)
         p.end()
         return QPixmap.fromImage(ov)
 
+    def _class_name_for_label(self, label):
+        """Return the display class name for a label tuple."""
+        class_id = label[0]
+        return self._classes[class_id] if class_id < len(self._classes) else f"c{class_id}"
+
+    def _label_score(self, label):
+        """Return the confidence score stored on a label, if any."""
+        return label[4] if len(label) > 4 else None
+
+    def _is_label_visible(self, label):
+        """Return whether a label should be shown under the active thresholds."""
+        class_name = self._class_name_for_label(label)
+        score = self._label_score(label)
+        if score is None:
+            return True
+        return score >= getattr(self, "class_thresholds", {}).get(class_name, 0.25)
+
+    def _start_panning(self, pos):
+        """Enter panning mode from the provided mouse position."""
+        self._panning = True
+        self._pan_start = pos
+        self._pan_off0 = QPointF(self._offset)
+        self.setCursor(Qt.CursorShape.ClosedHandCursor)
+
+    def _begin_drag(self, pos):
+        """Start a box or selection drag from the provided position."""
+        self._dragging = True
+        self._drag_start = pos
+        self._drag_current = pos
+
+    def _find_label_at(self, ix, iy):
+        """Return the topmost visible label index under an image-space point."""
+        from core.utils import point_in_aabb
+
+        for index, label in reversed(list(enumerate(self._labels))):
+            if not self._is_label_visible(label):
+                continue
+            if point_in_aabb(ix, iy, label[1], self._img_w, self._img_h):
+                return index
+        return None
+
+    def _handle_select_press(self, event):
+        """Update selection state for a click in select mode."""
+        image_x, image_y = self._w2i(event.pos())
+        label_index = self._find_label_at(image_x, image_y)
+        is_shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+
+        if label_index is not None:
+            if is_shift:
+                if label_index in self._selected:
+                    self._selected.discard(label_index)
+                else:
+                    self._selected.add(label_index)
+            else:
+                self._selected = {label_index}
+            self.label_selected.emit(label_index)
+            self.update()
+            return
+
+        if not is_shift:
+            self._selected.clear()
+            self.label_selected.emit(-1)
+        self._begin_drag(event.pos())
+
+    def _update_cursor_position(self, pos):
+        """Refresh the image-space cursor coordinates from a widget position."""
+        if not self._pixmap:
+            return
+        image_x, image_y = self._w2i(pos)
+        inside = 0 <= image_x <= self._img_w and 0 <= image_y <= self._img_h
+        self._cursor_img = (image_x, image_y) if inside else (-1, -1)
+        self.cursor_moved.emit(image_x, image_y)
+
+    def _update_hover_label(self, pos):
+        """Update the hovered label based on the current pointer position."""
+        if not self._pixmap:
+            return
+        image_x, image_y = self._w2i(pos)
+        hovered_index = self._find_label_at(image_x, image_y)
+        self._hover_label = hovered_index if hovered_index is not None else -1
+
+    def _paint_empty_state(self, painter):
+        """Render the placeholder message when no image is loaded."""
+        painter.setPen(QPen(QColor(100, 100, 140)))
+        painter.setFont(QFont("Segoe UI", 16))
+        painter.drawText(
+            self.rect(),
+            Qt.AlignmentFlag.AlignCenter,
+            "Load an image folder to start annotating",
+        )
+
+    def _paint_outlines(self, painter, inverse_zoom):
+        """Render visible annotation outlines and box fills."""
+        for index, label in enumerate(self._labels):
+            if not self._is_label_visible(label):
+                continue
+
+            class_id, obb = label[0], label[1]
+            is_selected = index in self._selected
+            is_hovered = index == self._hover_label
+            color = SELECTED_COLOR if is_selected else LABEL_COLORS[class_id % len(LABEL_COLORS)]
+            pen_width = (3.0 if is_selected else 2.0 if is_hovered else 1.2) * inverse_zoom
+            pen = QPen(color, pen_width)
+            if is_hovered and not is_selected:
+                pen.setStyle(Qt.PenStyle.DashLine)
+            painter.setPen(pen)
+
+            fill_color = QColor(color)
+            fill_color.setAlpha(64 if is_selected else 32)
+            painter.setBrush(QBrush(fill_color))
+
+            if getattr(self, "display_aabb", False):
+                xs = [obb[i] * self._img_w for i in range(0, 8, 2)]
+                ys = [obb[i + 1] * self._img_h for i in range(0, 8, 2)]
+                min_x, max_x = min(xs), max(xs)
+                min_y, max_y = min(ys), max(ys)
+                painter.drawRect(QRectF(min_x, min_y, max_x - min_x, max_y - min_y))
+                continue
+
+            polygon = QPolygonF()
+            for coord_index in range(0, 8, 2):
+                polygon.append(
+                    QPointF(
+                        obb[coord_index] * self._img_w,
+                        obb[coord_index + 1] * self._img_h,
+                    )
+                )
+            painter.drawPolygon(polygon)
+
+    def _paint_label_badges(self, painter, inverse_zoom):
+        """Render label chips with optional icons above each visible annotation."""
+        font_size = max(9, int(11 * inverse_zoom))
+        font = QFont("Segoe UI", font_size)
+        font.setBold(True)
+        painter.setFont(font)
+        metrics = QFontMetricsF(font)
+
+        for index, label in enumerate(self._labels):
+            if not self._is_label_visible(label):
+                continue
+
+            class_id, obb = label[0], label[1]
+            class_name = self._class_name_for_label(label)
+            score = self._label_score(label)
+            track_id = label[5] if len(label) > 5 else None
+            is_selected = index in self._selected
+            color = SELECTED_COLOR if is_selected else LABEL_COLORS[class_id % len(LABEL_COLORS)]
+
+            score_text = f" - {score:.2f}" if score is not None else ""
+            track_text = f" T{track_id} |" if track_id is not None else ""
+            text = f"{track_text} ID {index + 1} - {class_name}{score_text} "
+            pixmap = get_class_pixmap(class_name) if has_canvas_label_icon(class_name) else None
+
+            if getattr(self, "display_aabb", False):
+                xs = [obb[i] * self._img_w for i in range(0, 8, 2)]
+                ys = [obb[i + 1] * self._img_h for i in range(0, 8, 2)]
+                text_x, text_y = min(xs), min(ys) - 3 * inverse_zoom
+            else:
+                text_x = obb[0] * self._img_w
+                text_y = obb[1] * self._img_h - 3 * inverse_zoom
+
+            text_rect = metrics.boundingRect(text)
+            icon_size = text_rect.height() if pixmap else 0
+            total_width = text_rect.width() + (icon_size + 4 * inverse_zoom if pixmap else 0)
+            background_rect = QRectF(
+                text_x,
+                text_y - text_rect.height(),
+                total_width,
+                text_rect.height() + 2 * inverse_zoom,
+            )
+
+            painter.setPen(Qt.PenStyle.NoPen)
+            background_color = QColor(color)
+            background_color.setAlpha(180)
+            painter.setBrush(QBrush(background_color))
+            painter.drawRoundedRect(background_rect, 2 * inverse_zoom, 2 * inverse_zoom)
+
+            if pixmap:
+                scaled_pixmap = pixmap.scaled(
+                    int(icon_size),
+                    int(icon_size),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                painter.drawPixmap(
+                    QPointF(text_x + 2 * inverse_zoom, text_y - icon_size + 1 * inverse_zoom),
+                    scaled_pixmap,
+                )
+
+            painter.setPen(QPen(QColor(15, 15, 26)))
+            painter.drawText(
+                QPointF(text_x + (icon_size + 4 * inverse_zoom if pixmap else 0), text_y),
+                text,
+            )
+
+    def _paint_prompt_points(self, painter, inverse_zoom):
+        """Render queued positive and negative point prompts."""
+        for points, fill_color in (
+            (self._positive_prompt_points, QColor(88, 255, 128)),
+            (self._negative_prompt_points, QColor(255, 96, 96)),
+        ):
+            for point_x, point_y in points:
+                radius = 5.5 * inverse_zoom
+                painter.setPen(QPen(QColor(15, 15, 26), 1.6 * inverse_zoom))
+                painter.setBrush(QBrush(fill_color))
+                painter.drawEllipse(QPointF(point_x, point_y), radius, radius)
+
+    def _paint_drag_rect(self, painter, inverse_zoom):
+        """Render the active selection or box drag rectangle."""
+        if not self._dragging or self._panning:
+            return
+        start_x, start_y = self._w2i(self._drag_start)
+        current_x, current_y = self._w2i(self._drag_current)
+        rect = QRectF(
+            min(start_x, current_x),
+            min(start_y, current_y),
+            abs(current_x - start_x),
+            abs(current_y - start_y),
+        )
+        painter.setPen(QPen(QColor(255, 165, 0), 2 * inverse_zoom, Qt.PenStyle.DashDotLine))
+        painter.setBrush(QBrush(QColor(255, 165, 0, 40)))
+        painter.drawRect(rect)
+
+    def _paint_coordinate_overlay(self):
+        """Render the image coordinate chip in widget space."""
+        if self._cursor_img[0] < 0:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        text = f"  ({self._cursor_img[0]}, {self._cursor_img[1]})  "
+        if 0 <= self._hover_label < len(self._labels):
+            class_id = self._labels[self._hover_label][0]
+            class_name = (
+                self._classes[class_id] if class_id < len(self._classes) else f"c{class_id}"
+            )
+            text += f"[{self._hover_label + 1}. {class_name}]  "
+        font = QFont("Consolas", 10)
+        painter.setFont(font)
+        metrics = QFontMetricsF(font)
+        text_rect = metrics.boundingRect(text)
+        box_x, box_y = 8, self.height() - 8
+        background_rect = QRectF(
+            box_x,
+            box_y - text_rect.height() - 2,
+            text_rect.width() + 4,
+            text_rect.height() + 6,
+        )
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor(0, 0, 0, 200)))
+        painter.drawRoundedRect(background_rect, 4, 4)
+        painter.setPen(QPen(QColor(200, 200, 220)))
+        painter.drawText(QPointF(box_x + 2, box_y), text)
+        painter.end()
+
+    def _paint_busy_overlay(self):
+        """Render the blocking busy overlay while SAM work is running."""
+        if not self._busy:
+            return
+        painter = QPainter(self)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor(0, 0, 0, 120)))
+        painter.drawRect(self.rect())
+        painter.setPen(QPen(QColor(255, 200, 50)))
+        painter.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
+        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "SAM inference running...")
+        painter.end()
+
     # --- paint ---
     def paintEvent(self, a0):
         """Docstring for paintEvent."""
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        p.fillRect(self.rect(), BG_COLOR)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.fillRect(self.rect(), BG_COLOR)
         if self._pixmap is None:
-            p.setPen(QPen(QColor(100, 100, 140)))
-            p.setFont(QFont("Segoe UI", 16))
-            p.drawText(
-                self.rect(),
-                Qt.AlignmentFlag.AlignCenter,
-                "Load an image folder to start annotating",
-            )
-            p.end()
+            self._paint_empty_state(painter)
+            painter.end()
             return
 
-        p.translate(self._offset)
-        p.scale(self._zoom, self._zoom)
-        p.drawPixmap(0, 0, self._pixmap)
+        painter.translate(self._offset)
+        painter.scale(self._zoom, self._zoom)
+        painter.drawPixmap(0, 0, self._pixmap)
 
         if self._display_mode in ("mask", "both"):
             if self._mask_overlay is None:
                 self._mask_overlay = self._build_mask_overlay()
             if self._mask_overlay:
-                p.drawPixmap(0, 0, self._mask_overlay)
+                painter.drawPixmap(0, 0, self._mask_overlay)
 
-        iz = 1.0 / max(self._zoom, 0.01)
+        inverse_zoom = 1.0 / max(self._zoom, 0.01)
 
         if self._display_mode in ("outline", "both"):
-            for idx, lb in enumerate(self._labels):
-                cid, obb = lb[0], lb[1]
-                cn = self._classes[cid] if cid < len(self._classes) else ""
-                score = lb[4] if len(lb) > 4 else None
-                if score is not None and score < getattr(
-                    self, "class_thresholds", {}
-                ).get(cn, 0.25):
-                    continue
-
-                is_s = idx in self._selected
-                is_h = idx == self._hover_label
-                co = SELECTED_COLOR if is_s else LABEL_COLORS[cid % len(LABEL_COLORS)]
-                pw = (3.0 if is_s else 2.0 if is_h else 1.2) * iz
-                pen = QPen(co, pw)
-                if is_h and not is_s:
-                    pen.setStyle(Qt.PenStyle.DashLine)
-                p.setPen(pen)
-
-                # Show a box color for every box
-                bg_co = QColor(co)
-                bg_co.setAlpha(64 if is_s else 32)
-                p.setBrush(QBrush(bg_co))
-
-                if getattr(self, "display_aabb", False):
-                    xs = [obb[i] * self._img_w for i in range(0, 8, 2)]
-                    ys = [obb[i + 1] * self._img_h for i in range(0, 8, 2)]
-                    min_x, max_x = min(xs), max(xs)
-                    min_y, max_y = min(ys), max(ys)
-                    p.drawRect(QRectF(min_x, min_y, max_x - min_x, max_y - min_y))
-                else:
-                    poly = QPolygonF()
-                    for i in range(0, 8, 2):
-                        poly.append(
-                            QPointF(obb[i] * self._img_w, obb[i + 1] * self._img_h)
-                        )
-                    p.drawPolygon(poly)
-
-        # text labels with background
-        fs = max(9, int(11 * iz))
-        fnt = QFont("Segoe UI", fs)
-        fnt.setBold(True)
-        p.setFont(fnt)
-        fm = QFontMetricsF(fnt)
-        for idx, lb in enumerate(self._labels):
-            cid, obb = lb[0], lb[1]
-            cn = self._classes[cid] if cid < len(self._classes) else f"c{cid}"
-            score = lb[4] if len(lb) > 4 else None
-
-            if score is not None and score < getattr(self, "class_thresholds", {}).get(
-                cn, 0.25
-            ):
-                continue
-
-            is_s = idx in self._selected
-            co = SELECTED_COLOR if is_s else LABEL_COLORS[cid % len(LABEL_COLORS)]
-
-            score_str = f" - {score:.2f}" if score is not None else ""
-            txt = f" ID {idx + 1} - {cn}{score_str} "
-
-            pm = get_class_pixmap(cn)
-
-            if getattr(self, "display_aabb", False):
-                xs = [obb[i] * self._img_w for i in range(0, 8, 2)]
-                ys = [obb[i + 1] * self._img_h for i in range(0, 8, 2)]
-                tx, ty = min(xs), min(ys) - 3 * iz
-            else:
-                tx, ty = obb[0] * self._img_w, obb[1] * self._img_h - 3 * iz
-
-            tr = fm.boundingRect(txt)
-            icon_sz = tr.height() if pm else 0
-
-            total_w = tr.width() + (icon_sz + 4 * iz if pm else 0)
-
-            bgr = QRectF(tx, ty - tr.height(), total_w, tr.height() + 2 * iz)
-            p.setPen(Qt.PenStyle.NoPen)
-
-            # Use bounding box color for label background to highlight icons properly
-            bg_color = QColor(co)
-            bg_color.setAlpha(180)
-            p.setBrush(QBrush(bg_color))
-            p.drawRoundedRect(bgr, 2 * iz, 2 * iz)
-
-            if pm:
-                scaled_pm = pm.scaled(
-                    int(icon_sz),
-                    int(icon_sz),
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-                p.drawPixmap(QPointF(tx + 2 * iz, ty - icon_sz + 1 * iz), scaled_pm)
-
-            p.setPen(
-                QPen(QColor(15, 15, 26))
-            )  # Dark text for readability against the highlighted background
-            p.drawText(QPointF(tx + (icon_sz + 4 * iz if pm else 0), ty), txt)
-
-        # drag rect
-        if self._dragging and not self._panning:
-            sx, sy = self._w2i(self._drag_start)
-            cx, cy = self._w2i(self._drag_current)
-            r = QRectF(min(sx, cx), min(sy, cy), abs(cx - sx), abs(cy - sy))
-            p.setPen(QPen(QColor(255, 165, 0), 2 * iz, Qt.PenStyle.DashDotLine))
-            p.setBrush(QBrush(QColor(255, 165, 0, 40)))
-            p.drawRect(r)
-        p.end()
-
-        # coord overlay (widget coords)
-        if self._cursor_img[0] >= 0:
-            p2 = QPainter(self)
-            p2.setRenderHint(QPainter.RenderHint.Antialiasing)
-            ct = f"  ({self._cursor_img[0]}, {self._cursor_img[1]})  "
-            if 0 <= self._hover_label < len(self._labels):
-                ci = self._labels[self._hover_label][0]
-                cn = self._classes[ci] if ci < len(self._classes) else f"c{ci}"
-                ct += f"[{self._hover_label + 1}. {cn}]  "
-            cf = QFont("Consolas", 10)
-            p2.setFont(cf)
-            cfm = QFontMetricsF(cf)
-            cr = cfm.boundingRect(ct)
-            bx, by = 8, self.height() - 8
-            bgr = QRectF(bx, by - cr.height() - 2, cr.width() + 4, cr.height() + 6)
-            p2.setPen(Qt.PenStyle.NoPen)
-            p2.setBrush(QBrush(QColor(0, 0, 0, 200)))
-            p2.drawRoundedRect(bgr, 4, 4)
-            p2.setPen(QPen(QColor(200, 200, 220)))
-            p2.drawText(QPointF(bx + 2, by), ct)
-            p2.end()
-
-        # busy overlay
-        if self._busy:
-            p3 = QPainter(self)
-            p3.setPen(Qt.PenStyle.NoPen)
-            p3.setBrush(QBrush(QColor(0, 0, 0, 120)))
-            p3.drawRect(self.rect())
-            p3.setPen(QPen(QColor(255, 200, 50)))
-            p3.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
-            p3.drawText(
-                self.rect(), Qt.AlignmentFlag.AlignCenter, "SAM inference running..."
-            )
-            p3.end()
+            self._paint_outlines(painter, inverse_zoom)
+        self._paint_label_badges(painter, inverse_zoom)
+        self._paint_prompt_points(painter, inverse_zoom)
+        self._paint_drag_rect(painter, inverse_zoom)
+        painter.end()
+        self._paint_coordinate_overlay()
+        self._paint_busy_overlay()
 
     # --- mouse ---
     def keyPressEvent(self, a0):
@@ -438,107 +579,41 @@ class AnnotationCanvas(QWidget):
 
     def mousePressEvent(self, a0):
         """Docstring for mousePressEvent."""
-        if (
-            a0.button() == Qt.MouseButton.MiddleButton
-            or a0.button() == Qt.MouseButton.RightButton
-        ):
-            self._panning = True
-            self._pan_start = a0.pos()
-            self._pan_off0 = QPointF(self._offset)
-            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        if a0.button() == Qt.MouseButton.MiddleButton or a0.button() == Qt.MouseButton.RightButton:
+            self._start_panning(a0.pos())
             return
         if a0.button() == Qt.MouseButton.LeftButton and self._space_held:
-            self._panning = True
-            self._pan_start = a0.pos()
-            self._pan_off0 = QPointF(self._offset)
-            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            self._start_panning(a0.pos())
             return
         if a0.button() != Qt.MouseButton.LeftButton or self._busy:
             return
         if self._mode == "box":
-            self._dragging = True
-            self._drag_start = a0.pos()
-            self._drag_current = a0.pos()
-        elif self._mode == "select":
-            ix, iy = self._w2i(a0.pos())
-            from core.utils import point_in_aabb
-
-            idx = None
-            for i, lb in reversed(list(enumerate(self._labels))):
-                cid = lb[0]
-                cn = self._classes[cid] if cid < len(self._classes) else ""
-                score = lb[4] if len(lb) > 4 else None
-                if score is not None and score < getattr(
-                    self, "class_thresholds", {}
-                ).get(cn, 0.25):
-                    continue
-                if point_in_aabb(ix, iy, lb[1], self._img_w, self._img_h):
-                    idx = i
-                    break
-
-            if idx is not None:
-                modifiers = a0.modifiers()
-                is_shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
-                if is_shift:
-                    if idx in self._selected:
-                        self._selected.discard(idx)
-                    else:
-                        self._selected.add(idx)
-                else:
-                    self._selected = {idx}
-                self.label_selected.emit(idx)
-                self.update()
-            else:
-                modifiers = a0.modifiers()
-                is_shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
-                if not is_shift:
-                    self._selected.clear()
-                    self.label_selected.emit(-1)
-                self._dragging = True
-                self._drag_start = a0.pos()
-                self._drag_current = a0.pos()
-        elif self._mode == "click":
-            ix, iy = self._w2i(a0.pos())
-            self.point_clicked.emit(ix, iy)
+            self._begin_drag(a0.pos())
+            return
+        if self._mode == "select":
+            self._handle_select_press(a0)
+            return
+        if self._mode in ("point", "click"):
+            image_x, image_y = self._w2i(a0.pos())
+            self.point_clicked.emit(image_x, image_y)
 
     def mouseMoveEvent(self, a0):
         """Docstring for mouseMoveEvent."""
-        if self._pixmap:
-            ix, iy = self._w2i(a0.pos())
-            self._cursor_img = (
-                (ix, iy)
-                if 0 <= ix <= self._img_w and 0 <= iy <= self._img_h
-                else (-1, -1)
-            )
-            self.cursor_moved.emit(ix, iy)
+        self._update_cursor_position(a0.pos())
         if self._panning:
-            d = a0.pos() - self._pan_start
-            self._offset = self._pan_off0 + QPointF(d)
+            delta = a0.pos() - self._pan_start
+            self._offset = self._pan_off0 + QPointF(delta)
             self.update()
             return
         if self._dragging:
             self._drag_current = a0.pos()
             self.update()
             return
-        if self._pixmap:
-            from core.utils import point_in_aabb
-
-            ix, iy = self._w2i(a0.pos())
-            nh = None
-            for i, lb in reversed(list(enumerate(self._labels))):
-                cid = lb[0]
-                cn = self._classes[cid] if cid < len(self._classes) else ""
-                score = lb[4] if len(lb) > 4 else None
-                if score is not None and score < getattr(
-                    self, "class_thresholds", {}
-                ).get(cn, 0.25):
-                    continue
-                if point_in_aabb(ix, iy, lb[1], self._img_w, self._img_h):
-                    nh = i
-                    break
-            nh = nh if nh is not None else -1
-            if nh != self._hover_label:
-                self._hover_label = nh
+        previous_hover = self._hover_label
+        self._update_hover_label(a0.pos())
+        if self._hover_label != previous_hover:
+            self.update()
+            return
         self.update()
 
     def mouseReleaseEvent(self, a0):
@@ -569,9 +644,7 @@ class AnnotationCanvas(QWidget):
             if not is_shift:
                 self._selected.clear()
 
-            for i in find_labels_in_box(
-                sx, sy, ex, ey, self._labels, self._img_w, self._img_h
-            ):
+            for i in find_labels_in_box(sx, sy, ex, ey, self._labels, self._img_w, self._img_h):
                 self._selected.add(i)
             self.label_selected.emit(-1)
         self.update()

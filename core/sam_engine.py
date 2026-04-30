@@ -22,6 +22,7 @@ DEFAULT_SAM_CONF = 0.25
 
 class SAMEngine:
     """SAMEngine class."""
+
     """Wrapper for SAM 3 model operations"""
 
     def __init__(self, model_path="sam3.pt", device="cuda:0"):
@@ -57,6 +58,46 @@ class SAMEngine:
             logger.info(f"[OK] SAM click/box model loaded ({self.device})")
         return self._sam_model
 
+    def _predict_with_temp_image(self, image_rgb, **predict_kwargs):
+        """Run SAM prediction by writing the current image to a temporary file."""
+        sam = self._ensure_sam()
+        temp_path = "_temp_sam_img.jpg"
+        cv2.imwrite(temp_path, cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
+        try:
+            return sam.predict(source=temp_path, device=self.device, **predict_kwargs)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    def _build_mask_label(
+        self,
+        mask,
+        class_id,
+        existing_labels,
+        img_w,
+        img_h,
+        polygon_epsilon,
+        overlap_threshold,
+        success_message,
+        missing_message,
+    ):
+        """Convert a SAM mask into a stored label tuple after overlap checks."""
+        obb = mask_to_obb(mask, img_w, img_h)
+        if obb is None:
+            return None, missing_message
+
+        poly = mask_to_polygon(mask, img_w, img_h, polygon_epsilon)
+        mask_binary = mask_to_binary_image(mask)
+        is_over, overlap_index, overlap_ratio = check_mask_overlap(
+            mask_binary, existing_labels, img_w, img_h, overlap_threshold
+        )
+        if is_over:
+            return (
+                None,
+                f"Overlaps with annotation {overlap_index + 1} ({overlap_ratio * 100:.0f}%)",
+            )
+        return (class_id, obb, poly, mask_binary, 1.0), success_message
+
     def segment_text(
         self,
         image_rgb,
@@ -90,22 +131,14 @@ class SAMEngine:
         new_labels = []
         added = skipped = 0
         for i, mask in enumerate(masks):
-            cls_idx = (
-                int(boxes.cls[i].item())
-                if boxes is not None and boxes.cls is not None
-                else 0
-            )
+            cls_idx = int(boxes.cls[i].item()) if boxes is not None and boxes.cls is not None else 0
             if cls_idx >= len(prompts):
                 cls_idx = 0
             prompt_class = prompts[min(cls_idx, len(prompts) - 1)]
-            class_id = (
-                all_classes.index(prompt_class) if prompt_class in all_classes else 0
-            )
+            class_id = all_classes.index(prompt_class) if prompt_class in all_classes else 0
 
             conf = (
-                float(boxes.conf[i].item())
-                if boxes is not None and boxes.conf is not None
-                else 1.0
+                float(boxes.conf[i].item()) if boxes is not None and boxes.conf is not None else 1.0
             )
 
             obb = mask_to_obb(mask, img_w, img_h)
@@ -125,6 +158,46 @@ class SAMEngine:
 
         return new_labels, added, skipped, new_classes
 
+    def segment_points(
+        self,
+        image_rgb,
+        points,
+        point_labels,
+        class_id,
+        existing_labels,
+        polygon_epsilon=0.005,
+        overlap_threshold=0.1,
+    ):
+        """Multi-point segmentation using positive and negative click prompts."""
+        if not points:
+            return None, "Add at least one positive point before running segmentation"
+
+        results = self._predict_with_temp_image(
+            image_rgb,
+            points=[[int(x), int(y)] for x, y in points],
+            labels=[int(label) for label in point_labels],
+        )
+
+        if not results or len(results) == 0 or results[0].masks is None:
+            return None, "No object detected for the selected point prompts"
+        masks_data = results[0].masks.data
+        if len(masks_data) == 0:
+            return None, "No object detected for the selected point prompts"
+
+        mask = masks_data[0]
+        img_h, img_w = image_rgb.shape[:2]
+        return self._build_mask_label(
+            mask,
+            class_id,
+            existing_labels,
+            img_w,
+            img_h,
+            polygon_epsilon,
+            overlap_threshold,
+            f"Object detected from {len(points)} point prompt(s)",
+            "No object detected for the selected point prompts",
+        )
+
     def segment_point(
         self,
         image_rgb,
@@ -135,39 +208,16 @@ class SAMEngine:
         polygon_epsilon=0.005,
         overlap_threshold=0.1,
     ):
-        """Click segmentation, returns (label_tuple_or_None, message)"""
-        sam = self._ensure_sam()
-        temp_path = "_temp_sam_img.jpg"
-        cv2.imwrite(temp_path, cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
-        try:
-            results = sam.predict(
-                source=temp_path, points=[[x, y]], labels=[1], device=self.device
-            )
-        finally:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-
-        if not results or len(results) == 0 or results[0].masks is None:
-            return None, f"No object detected at ({x}, {y})"
-        masks_data = results[0].masks.data
-        if len(masks_data) == 0:
-            return None, f"No object detected at ({x}, {y})"
-
-        mask = masks_data[0]
-        img_h, img_w = image_rgb.shape[:2]
-        obb = mask_to_obb(mask, img_w, img_h)
-        if obb is None:
-            return None, f"No object detected at ({x}, {y})"
-
-        poly = mask_to_polygon(mask, img_w, img_h, polygon_epsilon)
-        mb = mask_to_binary_image(mask)
-        is_over, oidx, oratio = check_mask_overlap(
-            mb, existing_labels, img_w, img_h, overlap_threshold
+        """Backwards-compatible single-point segmentation wrapper."""
+        return self.segment_points(
+            image_rgb,
+            [(x, y)],
+            [1],
+            class_id,
+            existing_labels,
+            polygon_epsilon,
+            overlap_threshold,
         )
-        if is_over:
-            return None, f"Overlaps with annotation {oidx + 1} ({oratio * 100:.0f}%)"
-
-        return (class_id, obb, poly, mb, 1.0), f"Object detected at ({x}, {y})"
 
     def segment_box(
         self,
@@ -186,38 +236,26 @@ class SAMEngine:
         bx1, by1 = min(x1, x2), min(y1, y2)
         bx2, by2 = max(x1, x2), max(y1, y2)
 
-        sam = self._ensure_sam()
-        temp_path = "_temp_sam_img.jpg"
-        cv2.imwrite(temp_path, cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
-        try:
-            results = sam.predict(
-                source=temp_path, bboxes=[[bx1, by1, bx2, by2]], device=self.device
-            )
-        finally:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-
         img_h, img_w = image_rgb.shape[:2]
-
+        results = self._predict_with_temp_image(
+            image_rgb,
+            bboxes=[[bx1, by1, bx2, by2]],
+        )
         if results and len(results) > 0 and results[0].masks is not None:
             masks_data = results[0].masks.data
             if len(masks_data) > 0:
-                mask = masks_data[0]
-                obb = mask_to_obb(mask, img_w, img_h)
-                if obb is not None:
-                    poly = mask_to_polygon(mask, img_w, img_h, polygon_epsilon)
-                    mb = mask_to_binary_image(mask)
-                    is_over, oidx, oratio = check_mask_overlap(
-                        mb, existing_labels, img_w, img_h, overlap_threshold
-                    )
-                    if is_over:
-                        return (
-                            None,
-                            f"Overlaps with annotation {oidx + 1} ({oratio * 100:.0f}%)",
-                        )
-                    return (class_id, obb, poly, mb, 1.0), "SAM detected object"
+                return self._build_mask_label(
+                    masks_data[0],
+                    class_id,
+                    existing_labels,
+                    img_w,
+                    img_h,
+                    polygon_epsilon,
+                    overlap_threshold,
+                    "SAM detected object",
+                    "SAM did not detect any object",
+                )
 
-        # fallback to box
         if fallback_to_box:
             if abs(bx2 - bx1) < 4 or abs(by2 - by1) < 4:
                 return None, "Selection box too small"

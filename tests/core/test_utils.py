@@ -1,6 +1,7 @@
 import numpy as np
 from core.utils import mask_to_binary_image, point_in_obb
 
+
 def test_mask_to_binary_image():
     """Test generating binary image from mask."""
     mask = np.zeros((10, 10), dtype=bool)
@@ -9,6 +10,7 @@ def test_mask_to_binary_image():
     assert binary.shape == (10, 10)
     assert binary[3, 3] == 255
     assert binary[0, 0] == 0
+
 
 def test_point_in_obb():
     """Test if point is in OBB."""
