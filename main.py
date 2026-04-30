@@ -7,10 +7,12 @@ Usage:
     python main.py
     python main.py --model /path/to/sam3.pt
 """
-import sys
+
 import argparse
-from PyQt6.QtWidgets import QApplication
+import sys
+
 from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QApplication
 
 from ui.main_window import MainWindow
 
@@ -22,13 +24,13 @@ def main():
     parser.add_argument("--output", default=None, help="Output folder path")
     args = parser.parse_args()
 
-    app = QApplication(sys.argv)
-    app.setStyle("Fusion")  # Cross-platform consistent appearance
-
     # High DPI support
-    app.setHighDpiScaleFactorRoundingPolicy(
+    QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
+
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")  # Cross-platform consistent appearance
 
     window = MainWindow(sam_model_path=args.model)
 
@@ -40,11 +42,11 @@ def main():
 
     window.showMaximized()
 
-    print("=" * 60)
+    print("=" * 90)
     print("SAM3 Labeler — PyQt6 Edition")
     print("Shortcuts: Left/Right switch images | Del delete | Ctrl+S save")
     print("Scroll to zoom | Real-time hover highlight")
-    print("=" * 60)
+    print("=" * 90)
 
     sys.exit(app.exec())
 

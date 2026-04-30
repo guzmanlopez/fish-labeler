@@ -4,19 +4,20 @@ mask_to_obb, mask_to_polygon, mask_to_binary_image, polygon_to_mask,
 check_mask_overlap, box_to_obb, point_in_obb, find_clicked_label,
 obb_intersects_box, find_labels_in_box, create_coco_annotation, create_coco_dataset
 """
-import cv2
-import json
-import numpy as np
-from pathlib import Path
 
+import json
+
+import cv2
+import numpy as np
 
 # ------------------------------------------------------------------
 # Mask to coordinate conversion
 # ------------------------------------------------------------------
 
+
 def mask_to_obb(mask, img_width, img_height):
     """Convert binary mask to OBB coordinates"""
-    if hasattr(mask, 'cpu'):
+    if hasattr(mask, "cpu"):
         mask = mask.cpu().numpy()
     mask = mask.astype(np.uint8)
     if len(mask.shape) == 3:
@@ -40,7 +41,7 @@ def mask_to_obb(mask, img_width, img_height):
 
 def mask_to_polygon(mask, img_width, img_height, epsilon_ratio=0.005):
     """Convert binary mask to polygon coordinates (YOLO-Seg format)"""
-    if hasattr(mask, 'cpu'):
+    if hasattr(mask, "cpu"):
         mask = mask.cpu().numpy()
     mask = mask.astype(np.uint8)
     if len(mask.shape) == 3:
@@ -66,7 +67,7 @@ def mask_to_polygon(mask, img_width, img_height, epsilon_ratio=0.005):
 
 def mask_to_binary_image(mask):
     """Convert mask to binary image (0 or 255)"""
-    if hasattr(mask, 'cpu'):
+    if hasattr(mask, "cpu"):
         mask = mask.cpu().numpy()
     mask = mask.astype(np.uint8)
     if len(mask.shape) == 3:
@@ -91,20 +92,25 @@ def polygon_to_mask(polygon_coords, img_width, img_height):
 # Overlap detection
 # ------------------------------------------------------------------
 
-def check_mask_overlap(new_mask, existing_labels, img_width, img_height, threshold=None):
+
+def check_mask_overlap(
+    new_mask, existing_labels, img_width, img_height, threshold=None
+):
     """Check if new mask overlaps with existing annotations"""
     if new_mask is None:
         return False, None, 0
     if threshold is not None and threshold <= 0:
         return False, None, 0
-    if hasattr(new_mask, 'cpu'):
+    if hasattr(new_mask, "cpu"):
         new_mask = new_mask.cpu().numpy()
     new_mask = new_mask.astype(np.uint8)
     if len(new_mask.shape) == 3:
         new_mask = new_mask[0]
     if new_mask.shape != (img_height, img_width):
-        new_mask = cv2.resize(new_mask, (img_width, img_height), interpolation=cv2.INTER_NEAREST)
-    new_mask_binary = (new_mask > 0)
+        new_mask = cv2.resize(
+            new_mask, (img_width, img_height), interpolation=cv2.INTER_NEAREST
+        )
+    new_mask_binary = new_mask > 0
     new_mask_area = new_mask_binary.sum()
     if new_mask_area == 0:
         return False, None, 0
@@ -118,8 +124,10 @@ def check_mask_overlap(new_mask, existing_labels, img_width, img_height, thresho
         if existing_mask is None:
             continue
         if existing_mask.shape != (img_height, img_width):
-            existing_mask = cv2.resize(existing_mask, (img_width, img_height), interpolation=cv2.INTER_NEAREST)
-        existing_mask_binary = (existing_mask > 0)
+            existing_mask = cv2.resize(
+                existing_mask, (img_width, img_height), interpolation=cv2.INTER_NEAREST
+            )
+        existing_mask_binary = existing_mask > 0
         intersection = np.logical_and(new_mask_binary, existing_mask_binary)
         intersection_area = intersection.sum()
         if intersection_area > 0:
@@ -133,6 +141,7 @@ def check_mask_overlap(new_mask, existing_labels, img_width, img_height, thresho
 # OBB geometry
 # ------------------------------------------------------------------
 
+
 def box_to_obb(x1, y1, x2, y2, img_w, img_h):
     """Convert bounding box to axis-aligned OBB coordinates"""
     if img_w <= 0 or img_h <= 0:
@@ -144,15 +153,19 @@ def box_to_obb(x1, y1, x2, y2, img_w, img_h):
     if box_x2 <= box_x1 or box_y2 <= box_y1:
         return None
     points = [
-        (box_x1, box_y1), (box_x2, box_y1),
-        (box_x2, box_y2), (box_x1, box_y2),
+        (box_x1, box_y1),
+        (box_x2, box_y1),
+        (box_x2, box_y2),
+        (box_x1, box_y2),
     ]
     normalized_box = []
     for px, py in points:
-        normalized_box.extend([
-            max(0, min(1, px / img_w)),
-            max(0, min(1, py / img_h)),
-        ])
+        normalized_box.extend(
+            [
+                max(0, min(1, px / img_w)),
+                max(0, min(1, py / img_h)),
+            ]
+        )
     return normalized_box
 
 
@@ -213,7 +226,10 @@ def find_labels_in_box(x1, y1, x2, y2, labels, img_w, img_h):
 # COCO format
 # ------------------------------------------------------------------
 
-def create_coco_annotation(ann_id, image_id, category_id, polygon_coords, img_width, img_height):
+
+def create_coco_annotation(
+    ann_id, image_id, category_id, polygon_coords, img_width, img_height
+):
     """Create a single COCO annotation object"""
     segmentation = []
     for i in range(0, len(polygon_coords), 2):
@@ -254,7 +270,9 @@ def create_coco_dataset(image_list, labels_dict, classes, output_path):
         "categories": [],
     }
     for idx, class_name in enumerate(classes):
-        coco_data["categories"].append({"id": idx, "name": class_name, "supercategory": "object"})
+        coco_data["categories"].append(
+            {"id": idx, "name": class_name, "supercategory": "object"}
+        )
 
     ann_id = 1
     for img_id, img_path in enumerate(image_list):
@@ -263,13 +281,17 @@ def create_coco_dataset(image_list, labels_dict, classes, output_path):
         if img is None:
             continue
         img_h, img_w = img.shape[:2]
-        coco_data["images"].append({"id": img_id, "file_name": img_name, "width": img_w, "height": img_h})
+        coco_data["images"].append(
+            {"id": img_id, "file_name": img_name, "width": img_w, "height": img_h}
+        )
         if img_name in labels_dict:
             for class_id, polygon_coords in labels_dict[img_name]:
                 if polygon_coords and len(polygon_coords) >= 6:
-                    ann = create_coco_annotation(ann_id, img_id, class_id, polygon_coords, img_w, img_h)
+                    ann = create_coco_annotation(
+                        ann_id, img_id, class_id, polygon_coords, img_w, img_h
+                    )
                     coco_data["annotations"].append(ann)
                     ann_id += 1
 
-    with open(output_path, 'w', encoding='utf-8') as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         json.dump(coco_data, f, ensure_ascii=False, indent=2)

@@ -2,13 +2,15 @@
 File I/O management — config, progress, label persistence
 Preserves all original logic
 """
+
 import json
 import shutil
-import cv2
-import numpy as np
 from pathlib import Path
 
-from .utils import polygon_to_mask, mask_to_obb
+import cv2
+import numpy as np
+
+from .utils import mask_to_obb, polygon_to_mask
 
 CLASSES_STORE = Path(__file__).resolve().parent.parent / "sam3_classes.txt"
 PROGRESS_FILE = Path(__file__).resolve().parent.parent / "sam3_progress.json"
@@ -23,7 +25,7 @@ DEFAULT_CONFIG = {
 def load_config():
     try:
         if CONFIG_FILE.exists():
-            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 return {**DEFAULT_CONFIG, **json.load(f)}
         return DEFAULT_CONFIG.copy()
     except Exception as e:
@@ -38,7 +40,7 @@ def save_config(images_folder=None, output_folder=None):
             config["images_folder"] = images_folder
         if output_folder:
             config["output_folder"] = output_folder
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(config, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"Failed to save config: {e}")
@@ -48,14 +50,14 @@ def save_progress(folder_path, index, image_list):
     try:
         progress = {}
         if PROGRESS_FILE.exists():
-            with open(PROGRESS_FILE, 'r', encoding='utf-8') as f:
+            with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
                 progress = json.load(f)
         folder_key = str(Path(folder_path).resolve())
         progress[folder_key] = {
             "last_index": index,
             "last_image": image_list[index].name if image_list else "",
         }
-        with open(PROGRESS_FILE, 'w', encoding='utf-8') as f:
+        with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
             json.dump(progress, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"Failed to save progress: {e}")
@@ -65,7 +67,7 @@ def load_progress(folder_path):
     try:
         if not PROGRESS_FILE.exists():
             return 0
-        with open(PROGRESS_FILE, 'r', encoding='utf-8') as f:
+        with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
             progress = json.load(f)
         folder_key = str(Path(folder_path).resolve())
         if folder_key in progress:
@@ -89,12 +91,12 @@ def load_persisted_classes():
     try:
         with open(CLASSES_STORE, "r", encoding="utf-8") as f:
             lines = [line.strip() for line in f if line.strip()]
-            return lines if lines else ["debris"]
+            return lines if lines else ["fish"]
     except FileNotFoundError:
-        return ["debris"]
+        return ["fish"]
     except Exception as e:
         print(f"Failed to read classes file: {e}")
-        return ["debris"]
+        return ["fish"]
 
 
 def load_existing_labels(label_path, seg_label_path, current_image):
@@ -104,7 +106,7 @@ def load_existing_labels(label_path, seg_label_path, current_image):
 
     # Prefer YOLO-Seg format
     if seg_label_path and seg_label_path.exists():
-        with open(seg_label_path, 'r') as f:
+        with open(seg_label_path, "r") as f:
             for line in f:
                 parts = line.strip().split()
                 if len(parts) >= 7:
@@ -118,7 +120,7 @@ def load_existing_labels(label_path, seg_label_path, current_image):
 
     # OBB format (backward compatible)
     if label_path and label_path.exists():
-        with open(label_path, 'r') as f:
+        with open(label_path, "r") as f:
             for line in f:
                 parts = line.strip().split()
                 if len(parts) == 9:
@@ -154,7 +156,15 @@ def auto_save_labels(state):
     # Has annotations -> save
     images_folder = output_path / "images"
     images_folder.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(state.current_image_path, images_folder / state.current_image_path.name)
+    dst_image_path = images_folder / state.current_image_path.name
+    if (
+        not dst_image_path.exists()
+        or state.current_image_path.resolve() != dst_image_path.resolve()
+    ):
+        try:
+            shutil.copy2(state.current_image_path, dst_image_path)
+        except shutil.SameFileError:
+            pass
 
     saved = []
 
@@ -162,9 +172,9 @@ def auto_save_labels(state):
     if state.output_formats.get("obb", True):
         d = output_path / "labels"
         d.mkdir(parents=True, exist_ok=True)
-        with open(d / f"{img_stem}.txt", 'w') as f:
+        with open(d / f"{img_stem}.txt", "w") as f:
             for label in state.current_labels:
-                coords_str = ' '.join(f"{c:.6f}" for c in label[1])
+                coords_str = " ".join(f"{c:.6f}" for c in label[1])
                 f.write(f"{label[0]} {coords_str}\n")
         saved.append("OBB")
 
@@ -172,11 +182,11 @@ def auto_save_labels(state):
     if state.output_formats.get("seg", True):
         d = output_path / "labels_seg"
         d.mkdir(parents=True, exist_ok=True)
-        with open(d / f"{img_stem}.txt", 'w') as f:
+        with open(d / f"{img_stem}.txt", "w") as f:
             for label in state.current_labels:
                 poly = label[2] if len(label) > 2 and label[2] else label[1]
                 if poly:
-                    coords_str = ' '.join(f"{c:.6f}" for c in poly)
+                    coords_str = " ".join(f"{c:.6f}" for c in poly)
                     f.write(f"{label[0]} {coords_str}\n")
         saved.append("Seg")
 
@@ -197,7 +207,7 @@ def auto_save_labels(state):
 
     # classes.txt
     classes_file = output_path / "classes.txt"
-    with open(classes_file, 'w', encoding='utf-8') as f:
+    with open(classes_file, "w", encoding="utf-8") as f:
         for c in state.classes:
             f.write(f"{c}\n")
     persist_classes(state.classes)
