@@ -50,9 +50,9 @@ def test_mainwindow_init_uses_annotation_delegate(monkeypatch, qtbot):
     assert window.label_list.spacing() == 2
     assert window.label_list.minimumHeight() == 360
     assert window.label_list.maximumHeight() == 640
-    assert window.mask_opacity_slider.value() == 62
-    assert window.mask_opacity_label.text() == "62%"
-    assert window.canvas.mask_opacity == 0.62
+    assert window.mask_opacity_slider.value() == 30
+    assert window.mask_opacity_label.text() == "30%"
+    assert window.canvas.mask_opacity == 0.30
 
 
 def test_mainwindow_starts_with_secondary_sections_collapsed(monkeypatch, qtbot):
@@ -118,6 +118,7 @@ def test_buttons_and_tracking_controls_expose_tooltips(monkeypatch, qtbot):
     assert "selected annotations" in find_button(window, "Apply track").toolTip().lower()
     assert "visible annotations" in find_button(window, "Save").toolTip().lower()
     assert "loaded sequence" in find_button(window, "Clear tracks").toolTip().lower()
+    assert "every loaded frame" in find_button(window, "Remove from bbox").toolTip().lower()
 
 
 def test_sam3_section_collapses_all_segmentation_controls(monkeypatch, qtbot):
@@ -282,6 +283,46 @@ def test_point_prompt_persistence_across_frames_is_configurable(monkeypatch, qtb
     assert window.state.negative_prompt_points == [(50, 60)]
 
 
+def test_remove_from_bbox_removes_intersecting_labels_from_every_frame(monkeypatch, qtbot):
+    """A removal rectangle should apply to the active frame and all other frames."""
+    window = build_window(monkeypatch, qtbot)
+    image = np.zeros((100, 100, 3), dtype=np.uint8)
+    current_path = Path("frame_0001.jpg")
+    other_path = Path("frame_0002.jpg")
+    current_labels = [
+        (0, [0.1, 0.1, 0.3, 0.1, 0.3, 0.3, 0.1, 0.3], [], None, None),
+        (1, [0.7, 0.7, 0.9, 0.7, 0.9, 0.9, 0.7, 0.9], [], None, None),
+    ]
+    other_labels = [
+        (0, [0.15, 0.15, 0.25, 0.15, 0.25, 0.25, 0.15, 0.25], [], None, None),
+        (1, [0.6, 0.6, 0.8, 0.6, 0.8, 0.8, 0.6, 0.8], [], None, None),
+    ]
+    saved_labels = []
+
+    window.state.image_list = [current_path, other_path]
+    window.state.current_image_path = current_path
+    window.state.current_image = image
+    window.state.current_labels = current_labels
+    monkeypatch.setattr("ui.main_window.cv2.imread", lambda path: image.copy())
+    monkeypatch.setattr(
+        window,
+        "_load_track_aware_labels_for_frame",
+        lambda image_path: other_labels if image_path == other_path else current_labels,
+    )
+    monkeypatch.setattr(
+        "ui.main_window.auto_save_labels",
+        lambda state: saved_labels.append(list(state.current_labels)),
+    )
+    monkeypatch.setattr(window, "_save_tracking_state", lambda: None)
+
+    window._remove_from_bbox(5, 5, 35, 35)
+
+    assert window.state.current_labels == [current_labels[1]]
+    assert [current_labels[1]] in saved_labels
+    assert [other_labels[1]] in saved_labels
+    assert window.status_label.text() == "Removed 2 annotations across all frames"
+
+
 def test_load_current_image_replots_kept_point_prompts(monkeypatch, qtbot):
     """Loading another frame should re-apply kept point prompts onto the canvas."""
     window = build_window(monkeypatch, qtbot)
@@ -317,6 +358,9 @@ def test_load_folder_recognizes_dataset_run_and_loads_annotations(monkeypatch, q
     (run_folder / "labels_seg" / "frame_0001.txt").write_text(
         "1 0.1 0.1 0.9 0.1 0.9 0.9 0.1 0.9\n", encoding="utf-8"
     )
+    (run_folder / "run_config.json").write_text(
+        '{"classes": ["fish", "swordfish"]}', encoding="utf-8"
+    )
     image = np.zeros((32, 48, 3), dtype=np.uint8)
     monkeypatch.setattr("ui.main_window.cv2.imread", lambda path: image.copy())
     monkeypatch.setattr("ui.main_window.load_progress", lambda folder: 0)
@@ -329,6 +373,7 @@ def test_load_folder_recognizes_dataset_run_and_loads_annotations(monkeypatch, q
     assert window.output_input.text() == "sample-run"
     assert window.state.output_folder == run_folder
     assert window.state.image_list == [image_path]
+    assert window.state.classes == ["fish", "swordfish"]
     assert len(window.state.current_labels) == 1
 
 

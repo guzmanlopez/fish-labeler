@@ -1,7 +1,9 @@
 """Tests for command-line workflow interruption handling."""
 
+import argparse
 import sys
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
+from typing import Any, cast
 
 import main
 
@@ -46,33 +48,33 @@ def test_qt_workflow_saves_current_annotations_on_interrupt(monkeypatch):
             self.save_calls += 1
 
     qt_core = ModuleType("PyQt6.QtCore")
-    qt_core.Qt = FakeQt
+    cast(Any, qt_core).Qt = FakeQt
     qt_widgets = ModuleType("PyQt6.QtWidgets")
-    qt_widgets.QApplication = FakeApplication
+    cast(Any, qt_widgets).QApplication = FakeApplication
     main_window = ModuleType("ui.main_window")
-    main_window.MainWindow = FakeWindow
+    cast(Any, main_window).MainWindow = FakeWindow
     monkeypatch.setitem(sys.modules, "PyQt6.QtCore", qt_core)
     monkeypatch.setitem(sys.modules, "PyQt6.QtWidgets", qt_widgets)
     monkeypatch.setitem(sys.modules, "ui.main_window", main_window)
 
-    exit_code = main._run_app(SimpleNamespace(model="model.pt", images=None, output=None))
+    exit_code = main._run_app(argparse.Namespace(model="model.pt", images=None, output=None))
 
     assert exit_code == 130
     assert created_windows[0].save_calls == 1
 
 
-def test_main_video_subcommand_passes_registered_video_arguments(monkeypatch):
-    """The main CLI should parse video parameters before starting the workflow."""
+def test_main_sam3video_subcommand_passes_registered_video_arguments(monkeypatch):
+    """The main CLI should parse SAM3 video parameters before starting the workflow."""
     received = {}
 
     def fake_run_workflow(args):
         received.update(vars(args))
         return 0
 
-    monkeypatch.setattr("core.sam3_video_to_yolo.run_workflow", fake_run_workflow)
+    monkeypatch.setattr("segmentation.sam3_video_to_yolo.run_workflow", fake_run_workflow)
 
     exit_code = main.main([
-        "video",
+        "sam3video",
         "--video",
         "source.mp4",
         "--output-dir",

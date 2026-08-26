@@ -21,7 +21,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/core", "src/ui"]
+packages = ["src/core", "src/segmentation", "src/tracker", "src/ui"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/main.py" = "main.py"

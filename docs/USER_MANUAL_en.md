@@ -25,7 +25,7 @@ For practical video processing, use a GPU supported by the installed PyTorch bui
 Run the `video` workflow for each source video or logical batch. It samples frames, runs text-prompt segmentation, and creates a self-contained dataset directory.
 
 ```bash
-uv run fish-labeler video \
+uv run fish-labeler sam3video \
   --video /data/vessel-trip-01.mp4 \
   --output-dir vessel-trip-01 \
   --classes fish tuna shark \
@@ -225,7 +225,7 @@ The app copies a source image into `images/` the first time it saves annotations
 
 ### Build a New Dataset
 
-1. Run `fish-labeler video` with a conservative sample interval and target classes.
+1. Run `fish-labeler sam3video` with a conservative sample interval and target classes.
 2. Open `output/<run-name>/images` with the same output name in the app.
 3. Expand detection filters and initially show all classes and confidence levels.
 4. Correct false positives, missed objects, classes, and poor masks.

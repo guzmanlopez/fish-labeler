@@ -1,7 +1,7 @@
 """Annotation state model for the labeling workflow."""
 
 from core.io_manager import resolve_output_folder
-from core.sam_engine import DEFAULT_SAM_CONF
+from segmentation.sam_engine import DEFAULT_SAM_CONF
 
 
 class LabelingState:
@@ -47,7 +47,7 @@ class LabelingState:
         # Class score thresholds
         self.class_thresholds = {"fish": DEFAULT_SAM_CONF}
         # Mask overlay opacity in the canvas
-        self.mask_opacity = 0.62
+        self.mask_opacity = 0.30
         # Persisted track ids by frame filename
         self.frame_track_ids = {}
         # Track summary metadata keyed by track id

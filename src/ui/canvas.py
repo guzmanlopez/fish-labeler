@@ -109,6 +109,7 @@ class AnnotationCanvas(QWidget):
 
     point_clicked = pyqtSignal(int, int)
     box_drawn = pyqtSignal(int, int, int, int)
+    removal_box_drawn = pyqtSignal(int, int, int, int)
     label_selected = pyqtSignal(int)
     cursor_moved = pyqtSignal(int, int)
 
@@ -140,7 +141,7 @@ class AnnotationCanvas(QWidget):
         self._cursor_img = (-1, -1)
         self._busy = False
         self._space_held = False
-        self.mask_opacity = 0.62
+        self.mask_opacity = 0.30
         self._positive_prompt_points = []
         self._negative_prompt_points = []
 
@@ -223,7 +224,7 @@ class AnnotationCanvas(QWidget):
         """Docstring for _upd_cursor."""
         if self._busy:
             self.setCursor(Qt.CursorShape.WaitCursor)
-        elif self._mode in ("box", "point", "click"):
+        elif self._mode in ("box", "point", "click", "remove_box"):
             self.setCursor(Qt.CursorShape.CrossCursor)
         else:
             self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -589,7 +590,7 @@ class AnnotationCanvas(QWidget):
             return
         if a0.button() != Qt.MouseButton.LeftButton or self._busy:
             return
-        if self._mode == "box":
+        if self._mode in ("box", "remove_box"):
             self._begin_drag(a0.pos())
             return
         if self._mode == "select":
@@ -638,6 +639,8 @@ class AnnotationCanvas(QWidget):
             return
         if self._mode == "box":
             self.box_drawn.emit(sx, sy, ex, ey)
+        elif self._mode == "remove_box":
+            self.removal_box_drawn.emit(sx, sy, ex, ey)
         elif self._mode == "select":
             from core.utils import find_labels_in_box
 

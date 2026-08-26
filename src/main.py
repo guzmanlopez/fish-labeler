@@ -7,7 +7,7 @@ import sys
 from rich.console import Console
 from rich.panel import Panel
 
-from core.sam_engine import DEFAULT_MODEL_PATH
+from segmentation.sam_engine import DEFAULT_MODEL_PATH
 
 CONSOLE = Console()
 
@@ -74,13 +74,13 @@ def main(argv: list[str] | None = None) -> int:
     app_parser.add_argument("--output", help="Run name below the repository output directory")
 
     video_parser = workflows.add_parser(
-        "video", help="Prepare a video dataset below output/<run-name>"
+        "sam3video", help="Prepare a SAM3 video dataset below output/<run-name>"
     )
-    from core.sam3_video_to_yolo import add_video_arguments, run_workflow
+    from segmentation.sam3_video_to_yolo import add_video_arguments, run_workflow
 
     add_video_arguments(video_parser)
     args = parser.parse_args(arguments)
-    if args.workflow == "video":
+    if args.workflow == "sam3video":
         CONSOLE.print(
             Panel(
                 "Preparing a SAM 3 dataset below output/<run-name>.",

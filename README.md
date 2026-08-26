@@ -64,7 +64,7 @@ See the [Ultralytics SAM 3 documentation](https://docs.ultralytics.com/models/sa
 
 ```bash
 # Export every frame from a video and create an initial dataset
-uv run fish-labeler video --video /data/vessel-trip-01.mp4 --output-dir vessel-trip-01
+uv run fish-labeler sam3video --video /data/vessel-trip-01.mp4 --output-dir vessel-trip-01
 
 # Launch the Qt application to review and refine annotations
 uv run fish-labeler app
@@ -72,7 +72,7 @@ uv run fish-labeler app --images /data/vessel-trip-01/images --output vessel-tri
 uv run fish-labeler app --model /path/to/another-model.pt
 ```
 
-`fish-labeler video` exports every source frame and initial labels to `output/<run-name>/` by default. Use `--frame-step N` to export every $N$th frame instead. Open those images in the Qt application with `fish-labeler app --images output/<run-name>/images --output <run-name>` to review and refine the dataset. All generated files stay under the repository `output/` directory, even when source media is external or linked.
+`fish-labeler sam3video` exports every source frame and initial labels to `output/<run-name>/` by default. Use `--frame-step N` to export every $N$th frame instead. Open those images in the Qt application with `fish-labeler app --images output/<run-name>/images --output <run-name>` to review and refine the dataset. All generated files stay under the repository `output/` directory, even when source media is external or linked.
 
 ## Three Annotation Modes
 
@@ -125,14 +125,18 @@ fish-labeler/
 │   └── USER_MANUAL_en.md
 ├── output/               # All generated run directories
 └── src/
-    ├── main.py          # CLI workflows: app and video
+    ├── main.py          # CLI workflows: app and sam3video
     ├── config/          # Local classes, progress, and UI settings
     ├── models/           # SAM model weights
+    ├── segmentation/
+    │   ├── sam_engine.py        # SAM 3 model wrapper
+    │   └── sam3_video_to_yolo.py # SAM 3 video export workflow
+    ├── tracker/
+    │   └── offline_tracker.py   # Offline multi-object tracker
     ├── core/
     │   ├── state.py         # LabelingState
     │   ├── utils.py         # Coordinate transforms, overlap detection
     │   ├── io_manager.py    # Config, progress, label I/O
-    │   └── sam_engine.py    # SAM 3 model wrapper
     └── ui/
         ├── canvas.py        # QPainter vector canvas
         └── main_window.py   # Main window + control panels

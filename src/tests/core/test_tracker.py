@@ -1,7 +1,7 @@
 """Tests for the offline tracklet tracker."""
 
-from core import tracker
-from core.tracker import DetectionRecord, TrackingConfig, Tracklet, run_offline_tracker
+from tracker import offline_tracker
+from tracker.offline_tracker import DetectionRecord, TrackingConfig, Tracklet, run_offline_tracker
 
 
 def make_box(class_id, x1, y1, x2, y2, score=0.9):
@@ -93,12 +93,12 @@ def test_stitch_tracklets_handles_crossing_simultaneous_merge_indices(monkeypatc
         for index in range(4)
     ]
     monkeypatch.setattr(
-        tracker,
+        offline_tracker,
         "_hungarian",
         lambda cost_matrix: [(0, 3), (1, 2)] if len(cost_matrix) == 4 else [],
     )
-    monkeypatch.setattr(tracker, "_tracklet_stitch_cost", lambda *_: (True, 0.0))
+    monkeypatch.setattr(offline_tracker, "_tracklet_stitch_cost", lambda *_: (True, 0.0))
 
-    stitched = tracker._stitch_tracklets(tracklets, TrackingConfig())
+    stitched = offline_tracker._stitch_tracklets(tracklets, TrackingConfig())
 
     assert [len(tracklet.detections) for tracklet in stitched] == [2, 2]

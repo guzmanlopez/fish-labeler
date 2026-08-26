@@ -6,6 +6,7 @@ from core import io_manager
 from core.io_manager import (
     auto_save_labels,
     load_config,
+    load_dataset_classes,
     load_existing_labels,
     load_persisted_classes,
     load_tracking_data,
@@ -43,6 +44,16 @@ def test_persist_classes(tmp_path):
     persist_classes(["fish", "turtle"])
     classes = load_persisted_classes()
     assert classes == ["fish", "turtle"]
+
+
+def test_load_dataset_classes_prefers_run_config_mapping(tmp_path):
+    """Video run configuration should recover all prompt names after a UI autosave."""
+    (tmp_path / "classes.txt").write_text("fish\n", encoding="utf-8")
+    (tmp_path / "run_config.json").write_text(
+        '{"classes": ["fish", "swordfish", "shark"]}', encoding="utf-8"
+    )
+
+    assert load_dataset_classes(tmp_path) == ["fish", "swordfish", "shark"]
 
 
 def test_save_and_load_tracking_data(tmp_path):
@@ -109,3 +120,25 @@ def test_load_existing_labels_reads_video_workflow_polygons_from_labels_director
     assert len(labels) == 1
     assert labels[0][0] == 1
     assert labels[0][2] == [0.1, 0.1, 0.9, 0.1, 0.9, 0.9, 0.1, 0.9]
+
+
+def test_load_existing_labels_restores_exported_confidence(tmp_path):
+    """Qt labels should retain the confidence shown by the video workflow."""
+    label_path = tmp_path / "labels" / "frame_000000.txt"
+    annotation_path = tmp_path / "annotations_json" / "frame_000000.json"
+    label_path.parent.mkdir()
+    annotation_path.parent.mkdir()
+    label_path.write_text("0 0.1 0.1 0.9 0.1 0.9 0.9 0.1 0.9\n", encoding="utf-8")
+    annotation_path.write_text(
+        '{"detections": [{"confidence": 0.83, "mask_polygon": [[0.1, 0.1]]}]}',
+        encoding="utf-8",
+    )
+
+    labels = load_existing_labels(
+        label_path,
+        tmp_path / "labels_seg" / "frame_000000.txt",
+        np.zeros((100, 100, 3), dtype=np.uint8),
+        annotation_path,
+    )
+
+    assert labels[0][4] == 0.83

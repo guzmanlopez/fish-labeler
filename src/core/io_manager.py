@@ -120,6 +120,29 @@ def load_persisted_classes():
         return ["fish"]
 
 
+def load_dataset_classes(dataset_folder):
+    """Load a dataset's class mapping, preferring its video export configuration."""
+    dataset_path = Path(dataset_folder)
+    run_config_path = dataset_path / "run_config.json"
+    try:
+        with open(run_config_path, encoding="utf-8") as f:
+            classes = json.load(f).get("classes", [])
+        if isinstance(classes, list) and all(isinstance(name, str) and name for name in classes):
+            return classes
+    except FileNotFoundError, json.JSONDecodeError, OSError:
+        pass
+
+    classes_path = dataset_path / "classes.txt"
+    try:
+        with open(classes_path, encoding="utf-8") as f:
+            classes = [line.strip() for line in f if line.strip()]
+        if classes:
+            return classes
+    except OSError:
+        pass
+    return None
+
+
 def _load_segmentation_labels(seg_label_path, img_w, img_h):
     """Load normalized polygon labels from a YOLO segmentation file."""
     labels = []
@@ -137,15 +160,31 @@ def _load_segmentation_labels(seg_label_path, img_w, img_h):
     return labels
 
 
-def load_existing_labels(label_path, seg_label_path, current_image):
+def load_existing_labels(label_path, seg_label_path, current_image, annotation_path=None):
     """Load saved YOLO polygons from the current or legacy label directory."""
     img_h, img_w = current_image.shape[:2]
 
+    labels = []
     if label_path and label_path.exists():
-        return _load_segmentation_labels(label_path, img_w, img_h)
-    if seg_label_path and seg_label_path.exists():
-        return _load_segmentation_labels(seg_label_path, img_w, img_h)
-    return []
+        labels = _load_segmentation_labels(label_path, img_w, img_h)
+    elif seg_label_path and seg_label_path.exists():
+        labels = _load_segmentation_labels(seg_label_path, img_w, img_h)
+
+    if not labels or not annotation_path or not annotation_path.exists():
+        return labels
+    try:
+        detections = json.loads(annotation_path.read_text(encoding="utf-8")).get("detections", [])
+        scores = [
+            detection.get("confidence") for detection in detections if detection.get("mask_polygon")
+        ]
+    except json.JSONDecodeError, OSError:
+        return labels
+    return [
+        label[:4] + (float(scores[index]),)
+        if index < len(scores) and isinstance(scores[index], int | float)
+        else label
+        for index, label in enumerate(labels)
+    ]
 
 
 def label_is_visible(label, classes, class_thresholds, default_threshold=0.25):

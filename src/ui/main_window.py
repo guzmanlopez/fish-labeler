@@ -2,6 +2,7 @@
 
 import traceback
 from pathlib import Path
+from types import SimpleNamespace
 
 import cv2
 from PyQt6.QtCore import QSize, Qt, QThread, pyqtSignal
@@ -36,6 +37,7 @@ from core.io_manager import (
     auto_save_labels,
     get_visible_labels,
     load_config,
+    load_dataset_classes,
     load_existing_labels,
     load_persisted_classes,
     load_progress,
@@ -46,9 +48,10 @@ from core.io_manager import (
     save_progress,
     save_tracking_data,
 )
-from core.sam_engine import DEFAULT_MODEL_PATH, SAMEngine
 from core.state import LabelingState
-from core.tracker import TrackingConfig, run_offline_tracker
+from core.utils import remove_labels_in_box
+from segmentation.sam_engine import DEFAULT_MODEL_PATH, SAMEngine
+from tracker.offline_tracker import TrackingConfig, run_offline_tracker
 from ui.canvas import LABEL_COLORS, AnnotationCanvas, get_class_icon, icon_asset_exists
 
 # -- helpers -----------------------------------------------------------
@@ -292,6 +295,14 @@ class MainWindow(QMainWindow):
         self.selection_btn.setProperty("mode", "select")
         nav_lay.addWidget(self.selection_btn)
 
+        self.remove_from_bbox_btn = QPushButton("Remove from bbox")
+        self.remove_from_bbox_btn.setCheckable(True)
+        self.remove_from_bbox_btn.setProperty("mode", "remove_box")
+        self.remove_from_bbox_btn.setToolTip(
+            "Draw a rectangle to remove intersecting annotations from every loaded frame."
+        )
+        nav_lay.addWidget(self.remove_from_bbox_btn)
+
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         nav_lay.addWidget(spacer)
@@ -361,6 +372,7 @@ class MainWindow(QMainWindow):
         self.visual_seg_sec = CollapsibleSection("Visual prompt:")
         self.mode_group = QButtonGroup(self)
         self.mode_group.addButton(self.selection_btn, 2)
+        self.mode_group.addButton(self.remove_from_bbox_btn, 3)
         for i, (label, mode, tip) in enumerate([
             ("Point", "point", "Single object instance using a point (1)"),
             ("Box", "box", "Single object instance using a box (2)"),
@@ -781,6 +793,7 @@ class MainWindow(QMainWindow):
         self.canvas.set_mask_opacity(self.state.mask_opacity)
         self.canvas.point_clicked.connect(self._on_point_click)
         self.canvas.box_drawn.connect(self._on_box_drawn)
+        self.canvas.removal_box_drawn.connect(self._remove_from_bbox)
         self.canvas.label_selected.connect(self._on_label_selected)
         self.canvas.set_prompt_points([], [])
         body.addWidget(self.canvas)
@@ -1053,7 +1066,8 @@ class MainWindow(QMainWindow):
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         label_output_path = self.state.output_folder / "labels" / f"{image_path.stem}.txt"
         label_seg_output_path = self.state.output_folder / "labels_seg" / f"{image_path.stem}.txt"
-        return load_existing_labels(label_output_path, label_seg_output_path, rgb)
+        annotation_path = self.state.output_folder / "annotations_json" / f"{image_path.stem}.json"
+        return load_existing_labels(label_output_path, label_seg_output_path, rgb, annotation_path)
 
     def _load_track_aware_labels_for_frame(self, image_path):
         """Load a frame's labels and attach any persisted track ids by index."""
@@ -1445,6 +1459,10 @@ class MainWindow(QMainWindow):
             self.state.output_folder = dataset_folder
             op = dataset_folder.name
             self.output_input.setText(op)
+            dataset_classes = load_dataset_classes(dataset_folder)
+            if dataset_classes:
+                self.state.classes = dataset_classes
+                self._refresh_class_combos()
         else:
             self.state.output_folder = resolve_output_folder(op)
         self.folder_input.setText(str(images_folder))
@@ -1486,8 +1504,9 @@ class MainWindow(QMainWindow):
 
         label_output_path = self.state.output_folder / "labels" / f"{img_path.stem}.txt"
         label_seg_output_path = self.state.output_folder / "labels_seg" / f"{img_path.stem}.txt"
+        annotation_path = self.state.output_folder / "annotations_json" / f"{img_path.stem}.json"
         self.state.current_labels = load_existing_labels(
-            label_output_path, label_seg_output_path, rgb
+            label_output_path, label_seg_output_path, rgb, annotation_path
         )
         self._apply_current_frame_track_ids()
 
@@ -1709,6 +1728,83 @@ class MainWindow(QMainWindow):
         self._worker = SAMWorker(_do)
         self._worker.finished.connect(self._on_point_seg_done)  # same structure
         self._worker.start()
+
+    def _remove_from_bbox(self, x1, y1, x2, y2):
+        """Remove annotations intersecting the drawn rectangle from every loaded frame."""
+        current_image = self.state.current_image
+        if not self.state.image_list or current_image is None:
+            self._set_status("Load a frame sequence before removing annotations")
+            return
+
+        self._sync_current_frame_track_ids()
+        auto_save_labels(self.state)
+        removed_count = 0
+        current_frame_path = self.state.current_image_path
+
+        for image_path in self.state.image_list:
+            removed_from_frame, remaining_labels = self._remove_from_bbox_frame(
+                image_path,
+                current_frame_path,
+                current_image,
+                x1,
+                y1,
+                x2,
+                y2,
+            )
+            removed_count += removed_from_frame
+            if image_path == current_frame_path and remaining_labels is not None:
+                self.state.current_labels = remaining_labels
+                self.state.selected_labels.clear()
+
+        if not removed_count:
+            self._set_status("No annotations intersect the selected bounding box")
+            return
+
+        self._rebuild_track_summaries()
+        self._save_tracking_state()
+        self._refresh_labels_ui()
+        self._refresh_track_list()
+        self._set_status(f"Removed {removed_count} annotations across all frames")
+
+    def _remove_from_bbox_frame(
+        self, image_path, current_frame_path, current_image, x1, y1, x2, y2
+    ):
+        """Remove and persist annotations for one frame when they intersect the box."""
+        if image_path == current_frame_path:
+            image = current_image
+            labels = self.state.current_labels
+        else:
+            image_bgr = cv2.imread(str(image_path))
+            if image_bgr is None:
+                return 0, None
+            image = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+            labels = self._load_track_aware_labels_for_frame(image_path)
+
+        remaining_labels = remove_labels_in_box(
+            x1, y1, x2, y2, labels, image.shape[1], image.shape[0]
+        )
+        removed_count = len(labels) - len(remaining_labels)
+        if not removed_count:
+            return 0, remaining_labels
+
+        frame_key = image_path.name
+        track_ids = [get_label_track_id(label) for label in remaining_labels]
+        if any(track_id is not None for track_id in track_ids):
+            self.state.frame_track_ids[frame_key] = track_ids
+        else:
+            self.state.frame_track_ids.pop(frame_key, None)
+
+        frame_state = SimpleNamespace(
+            current_image=image,
+            current_image_path=image_path,
+            current_labels=remaining_labels,
+            output_folder=self.state.output_folder,
+            classes=self.state.classes,
+            class_thresholds=self.state.class_thresholds,
+            output_formats=self.state.output_formats,
+        )
+        auto_save_labels(frame_state)
+        return removed_count, remaining_labels
 
     # ==================================================================
     # UI sync

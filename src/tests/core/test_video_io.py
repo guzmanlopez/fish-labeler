@@ -1,13 +1,15 @@
 """Tests for the video export helpers and command module imports."""
 
+import argparse
 import json
 import sys
 from types import ModuleType, SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
-from core import sam3_video_to_yolo
 from core.video_io import YOLOExporter
+from segmentation import sam3_video_to_yolo
 
 
 class StubVideoHandler:
@@ -21,7 +23,7 @@ class StubVideoHandler:
 
 def test_video_command_imports_without_missing_modules():
     """Verify the video command imports without relying on removed modules."""
-    from core import sam3_video_to_yolo
+    from segmentation import sam3_video_to_yolo
 
     assert sam3_video_to_yolo.DEFAULT_MODEL_PATH.name == "sam3.pt"
 
@@ -61,17 +63,28 @@ def test_build_predictor_passes_quantize_not_half(monkeypatch, tmp_path):
 
     ultralytics_models = ModuleType("ultralytics.models")
     ultralytics_sam = ModuleType("ultralytics.models.sam")
-    ultralytics_sam.SAM3SemanticPredictor = FakePredictor
+    cast(Any, ultralytics_sam).SAM3SemanticPredictor = FakePredictor
     monkeypatch.setitem(sys.modules, "ultralytics.models", ultralytics_models)
     monkeypatch.setitem(sys.modules, "ultralytics.models.sam", ultralytics_sam)
 
     sam3_video_to_yolo.build_predictor(
         tmp_path / "model.pt",
-        SimpleNamespace(conf=0.5, iou=0.5, imgsz=728, device=None, quantize=16),
+        argparse.Namespace(conf=0.5, iou=0.5, imgsz=728, device=None, quantize=16),
     )
 
     assert received["quantize"] == 16
     assert "half" not in received
+
+
+def test_prioritize_fish_detections_suppresses_overlapping_non_fish():
+    """An overlapping fish detection should win over other prompted species."""
+    fish = {"class_name": "fish", "bbox_xyxy": [10.0, 10.0, 50.0, 50.0]}
+    shark = {"class_name": "shark", "bbox_xyxy": [12.0, 12.0, 48.0, 48.0]}
+    turtle = {"class_name": "sea turtle", "bbox_xyxy": [60.0, 60.0, 90.0, 90.0]}
+
+    detections = sam3_video_to_yolo.prioritize_fish_detections([fish, shark, turtle], 0.5)
+
+    assert detections == [fish, turtle]
 
 
 def test_yolo_exporter_writes_segmentation_dataset(tmp_path):
@@ -141,7 +154,7 @@ def test_interrupted_video_run_exports_completed_frames(monkeypatch, tmp_path):
         def export(self, video_handler, annotations, **kwargs):
             exported.update(annotations)
 
-    args = SimpleNamespace(
+    args = argparse.Namespace(
         video=video_path,
         model=model_path,
         output_dir="run",
@@ -149,6 +162,7 @@ def test_interrupted_video_run_exports_completed_frames(monkeypatch, tmp_path):
         sample_every_seconds=None,
         max_frames=None,
         classes=["fish"],
+        iou=0.5,
         overwrite_frames=False,
     )
     monkeypatch.setattr(sam3_video_to_yolo, "resolve_output_folder", lambda _: output_dir)
@@ -161,7 +175,7 @@ def test_interrupted_video_run_exports_completed_frames(monkeypatch, tmp_path):
     monkeypatch.setattr(
         sam3_video_to_yolo,
         "result_to_annotation",
-        lambda _, frame_index, __: {"frame_idx": frame_index, "detections": []},
+        lambda _, frame_index, __, ___: {"frame_idx": frame_index, "detections": []},
     )
     monkeypatch.setattr(sam3_video_to_yolo, "YOLOExporter", StubExporter)
     monkeypatch.setattr(

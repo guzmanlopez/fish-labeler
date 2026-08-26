@@ -246,6 +246,12 @@ def find_labels_in_box(x1, y1, x2, y2, labels, img_w, img_h):
     return found_indices
 
 
+def remove_labels_in_box(x1, y1, x2, y2, labels, img_w, img_h):
+    """Return labels whose bounding quadrilaterals do not intersect a selection box."""
+    indices_to_remove = set(find_labels_in_box(x1, y1, x2, y2, labels, img_w, img_h))
+    return [label for index, label in enumerate(labels) if index not in indices_to_remove]
+
+
 # ------------------------------------------------------------------
 # COCO format
 # ------------------------------------------------------------------

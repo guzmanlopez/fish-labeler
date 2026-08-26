@@ -40,13 +40,13 @@ class SAMEngine:
             from ultralytics.models.sam import SAM3SemanticPredictor
 
             self._predictor = SAM3SemanticPredictor(
-                overrides=dict(
-                    conf=DEFAULT_SAM_CONF,
-                    model=self.model_path,
-                    device=self.device,
-                    quantize=16,
-                    verbose=False,
-                )
+                overrides={
+                    "conf": DEFAULT_SAM_CONF,
+                    "model": self.model_path,
+                    "device": self.device,
+                    "quantize": 16,
+                    "verbose": False,
+                },
             )
             logger.info(f"[OK] SAM 3 semantic model loaded ({self.device})")
         return self._predictor

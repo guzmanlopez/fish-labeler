@@ -13,7 +13,7 @@ frame, and writes a YOLO-seg style dataset layout:
         run_config.json
 
 Example:
-    fish-labeler video \
+    fish-labeler sam3video \
         --video /path/to/video.mp4 \
         --output-dir vessel-trip-01 \
         --classes fish tuna shark \
@@ -37,15 +37,14 @@ from rich.logging import RichHandler
 from tqdm.auto import tqdm
 
 from core.io_manager import resolve_output_folder
-from core.sam_engine import DEFAULT_MODEL_PATH
 from core.video_io import VideoHandler, YOLOExporter
+from segmentation.sam_engine import DEFAULT_MODEL_PATH
 
 LOG = logging.getLogger(__name__)
 CONSOLE = Console()
 DEFAULT_CLASSES = [
     "fish",
     "swordfish",
-    "tuna",
     "shark",
     "stingray",
     "sea turtle",
@@ -271,8 +270,40 @@ def polygon_from_mask(
     return [[float(x / image_width), float(y / image_height)] for x, y in points]
 
 
+def bbox_iou(left: Sequence[float], right: Sequence[float]) -> float:
+    """Return intersection-over-union for two ``[x1, y1, x2, y2]`` boxes."""
+    intersection_width = max(0.0, min(left[2], right[2]) - max(left[0], right[0]))
+    intersection_height = max(0.0, min(left[3], right[3]) - max(left[1], right[1]))
+    intersection_area = intersection_width * intersection_height
+    if not intersection_area:
+        return 0.0
+    left_area = max(0.0, left[2] - left[0]) * max(0.0, left[3] - left[1])
+    right_area = max(0.0, right[2] - right[0]) * max(0.0, right[3] - right[1])
+    return intersection_area / (left_area + right_area - intersection_area)
+
+
+def prioritize_fish_detections(detections: list[dict], overlap_threshold: float) -> list[dict]:
+    """Keep fish detections and suppress non-fish detections that overlap them."""
+    fish_detections = [
+        detection for detection in detections if detection["class_name"].casefold() == "fish"
+    ]
+    if not fish_detections:
+        return detections
+    return [
+        detection
+        for detection in detections
+        if detection in fish_detections
+        or all(
+            bbox_iou(detection["bbox_xyxy"], fish["bbox_xyxy"]) < overlap_threshold
+            for fish in fish_detections
+        )
+    ]
+
+
 # complexipy: ignore
-def result_to_annotation(result, frame_idx: int, class_prompts: Sequence[str]) -> dict:
+def result_to_annotation(
+    result, frame_idx: int, class_prompts: Sequence[str], overlap_threshold: float
+) -> dict:
     """Docstring for result_to_annotation."""
     image_height, image_width = result.orig_shape
     annotation = {
@@ -321,6 +352,9 @@ def result_to_annotation(result, frame_idx: int, class_prompts: Sequence[str]) -
             "track_id": None,
         })
 
+    annotation["detections"] = prioritize_fish_detections(
+        annotation["detections"], overlap_threshold
+    )
     return annotation
 
 
@@ -624,7 +658,7 @@ def run(args: argparse.Namespace) -> Path:
             )
             predictor.set_image(str(frame_path))
             results = predictor(text=args.classes)
-            annotation = result_to_annotation(results[0], frame_idx, args.classes)
+            annotation = result_to_annotation(results[0], frame_idx, args.classes, args.iou)
             annotations[frame_idx] = annotation
             detection_count = len(annotation["detections"])
             total_detections += detection_count
