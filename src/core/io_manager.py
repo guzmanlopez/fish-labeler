@@ -12,15 +12,27 @@ import numpy as np
 
 from .utils import mask_to_obb, polygon_to_mask
 
-CLASSES_STORE = Path(__file__).resolve().parent.parent / "sam3_classes.txt"
-PROGRESS_FILE = Path(__file__).resolve().parent.parent / "sam3_progress.json"
-CONFIG_FILE = Path(__file__).resolve().parent.parent / "sam3_config.json"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
+OUTPUT_ROOT = PROJECT_ROOT / "output"
+CLASSES_STORE = CONFIG_DIR / "sam3_classes.txt"
+PROGRESS_FILE = CONFIG_DIR / "sam3_progress.json"
+CONFIG_FILE = CONFIG_DIR / "sam3_config.json"
 TRACKS_FILE_NAME = "tracks.json"
 
 DEFAULT_CONFIG = {
     "images_folder": "./sample_images",
-    "output_folder": "./output",
+    "output_folder": "default",
 }
+
+
+def resolve_output_folder(requested_path=None):
+    """Return a run directory directly below the repository output folder."""
+    requested = Path(str(requested_path).strip()) if requested_path else Path("default")
+    run_name = requested.name
+    if run_name in {"", ".", "..", "output"}:
+        run_name = "default"
+    return OUTPUT_ROOT / run_name
 
 
 def load_config():
@@ -30,7 +42,7 @@ def load_config():
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 return {**DEFAULT_CONFIG, **json.load(f)}
         return DEFAULT_CONFIG.copy()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"Failed to load config: {e}")
         return DEFAULT_CONFIG.copy()
 
@@ -43,9 +55,10 @@ def save_config(images_folder=None, output_folder=None):
             config["images_folder"] = images_folder
         if output_folder:
             config["output_folder"] = output_folder
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(config, f, ensure_ascii=False, indent=2)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"Failed to save config: {e}")
 
 
@@ -61,9 +74,10 @@ def save_progress(folder_path, index, image_list):
             "last_index": index,
             "last_image": image_list[index].name if image_list else "",
         }
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
             json.dump(progress, f, ensure_ascii=False, indent=2)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"Failed to save progress: {e}")
 
 
@@ -78,7 +92,7 @@ def load_progress(folder_path):
         if folder_key in progress:
             return progress[folder_key].get("last_index", 0)
         return 0
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"Failed to load progress: {e}")
         return 0
 
@@ -86,10 +100,10 @@ def load_progress(folder_path):
 def persist_classes(classes):
     """Docstring for persist_classes."""
     try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         with open(CLASSES_STORE, "w", encoding="utf-8") as f:
-            for c in classes:
-                f.write(f"{c}\n")
-    except Exception as e:
+            f.writelines(f"{class_name}\n" for class_name in classes)
+    except Exception as e:  # noqa: BLE001
         print(f"Failed to write classes file: {e}")
 
 
@@ -101,7 +115,7 @@ def load_persisted_classes():
             return lines if lines else ["fish"]
     except FileNotFoundError:
         return ["fish"]
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"Failed to read classes file: {e}")
         return ["fish"]
 
@@ -241,8 +255,7 @@ def _write_classes_file(output_path, classes):
     """Persist the current class list alongside saved labels."""
     classes_file = output_path / "classes.txt"
     with open(classes_file, "w", encoding="utf-8") as f:
-        for class_name in classes:
-            f.write(f"{class_name}\n")
+        f.writelines(f"{class_name}\n" for class_name in classes)
     persist_classes(classes)
 
 
@@ -301,7 +314,7 @@ def load_tracking_data(output_folder):
             "tracks": tracks,
             "config": payload.get("config", {}),
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"Failed to load tracking data: {e}")
         return {"frame_track_ids": {}, "tracks": {}, "config": {}}
 
@@ -320,5 +333,5 @@ def save_tracking_data(output_folder, frame_track_ids, tracks, config):
     try:
         with open(tracks_file, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"Failed to save tracking data: {e}")

@@ -1,16 +1,14 @@
-# SAM3 Labeler (PyQt6) — User Manual
+# Fish Labeler User Manual
 
 ## Introduction
 
-Welcome to SAM3 Labeler PyQt6 edition! This desktop application helps you annotate objects in images. Compared to the original Gradio web version, the PyQt6 version offers millisecond-level interaction, native zoom/pan, real-time hover highlights, and non-blocking SAM inference.
-
-> **Also available in:** [繁體中文](USER_MANUAL_zh-TW.md)
+Fish Labeler is intended for annotating fish, catch, crew, and vessel context in imagery collected aboard fishing vessels. Its PyQt6 interface supports responsive zoom/pan, hover feedback, and background SAM inference.
 
 **What can this tool do?**
 
 - Annotate objects using three methods: click, box-select, or text prompt
 - Auto-detect object boundaries via Meta SAM 3
-- Export in OBB / YOLO-Seg / PNG Mask / COCO JSON simultaneously
+- Export in OBB / YOLO-Seg / PNG Mask formats
 - Zoom with scroll wheel, pan with right-click drag — ideal for high-res images
 
 ---
@@ -22,7 +20,7 @@ Welcome to SAM3 Labeler PyQt6 edition! This desktop application helps you annota
 | Item | Minimum | Recommended |
 |------|---------|-------------|
 | OS | Windows 10 / Ubuntu 20.04 / macOS 12+ | Windows 11 / Ubuntu 22.04 / macOS 14+ |
-| Python | 3.10 | 3.12 |
+| Python | 3.12 | 3.12 |
 | GPU | NVIDIA GTX 1060 (6GB) / Apple M1 | NVIDIA RTX 3060+ (8GB+) / Apple M2+ |
 | CUDA | 11.7 (macOS uses MPS, no CUDA needed) | 12.1+ |
 | RAM | 8 GB | 16 GB+ |
@@ -36,20 +34,20 @@ Welcome to SAM3 Labeler PyQt6 edition! This desktop application helps you annota
 # 1. Install PyTorch (choose your CUDA version)
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 
-# 2. Install dependencies
-pip install PyQt6 opencv-python numpy ultralytics
+# 2. Install locked dependencies
+uv sync --locked --all-extras --dev
 ```
 
 ### 1.3 Download SAM 3 Model
 
-`sam3.pt` (~3.4 GB) is not included. Download from [Hugging Face](https://huggingface.co/facebook/sam3) (requires Meta approval).
+Download `sam3.pt` from [Hugging Face](https://huggingface.co/facebook/sam3) (requires Meta approval) and place it at `src/models/sam3.pt`.
 
 ### 1.4 Launch
 
 ```bash
-python main.py
-python main.py --model /path/to/sam3.pt
-python main.py --model sam3.pt --images ./images --output ./output
+uv run fish-labeler app
+uv run fish-labeler app --images /data/vessel-trip-01/images --output vessel-trip-01
+uv run fish-labeler app --model /path/to/sam3.pt
 ```
 
 ---
@@ -74,11 +72,11 @@ python main.py --model sam3.pt --images ./images --output ./output
 │        │                                      │  Overlap  ──●─ 10%      │
 │        │                                      │                          │
 │        │                                      │  Output Formats          │
-│        │                                      │  ☑OBB ☑Seg ☐Mask ☐COCO │
+│        │                                      │  ☑OBB ☑Seg ☐Mask      │
 │        │                                      │                          │
 │        │                                      │  Annotation List         │
-│        │                                      │  ■ 1. plastic_bottle    │
-│        │                                      │  ■ 2. foam (selected)   │
+│        │                                      │  ■ 1. tuna              │
+│        │                                      │  ■ 2. swordfish         │
 │        │                                      │                          │
 │        │                                      │  [Class▼] [Apply]        │
 │        │                                      │  [🗑Delete] [Clear All]  │
@@ -93,7 +91,7 @@ python main.py --model sam3.pt --images ./images --output ./output
 | Element | Description |
 |---------|-------------|
 | **Image Folder** | Path to images, type or browse with 📁 |
-| **Output Folder** | Where annotations are saved |
+| **Output Folder** | Run name created below the repository `output/` directory |
 | **Load** | Load images and resume from last position |
 | **N / Go** | Jump to image number |
 
@@ -151,7 +149,6 @@ Enter object names (comma-separated), press Enter. SAM 3 finds all matching obje
 | OBB | ☑ | `labels/*.txt` — YOLO OBB training |
 | YOLO-Seg | ☑ | `labels_seg/*.txt` — instance segmentation |
 | PNG Mask | ☐ | `masks/*.png` — semantic segmentation |
-| COCO JSON | ☐ | `coco_annotations.json` — COCO format |
 
 #### Annotation List
 - Color square per annotation matching class color
@@ -162,7 +159,7 @@ Enter object names (comma-separated), press Enter. SAM 3 finds all matching obje
 
 ## Chapter 3: Quick Start
 
-1. **Launch**: `python main.py --model sam3.pt`
+1. **Launch**: `uv run fish-labeler app`
 2. **Load images**: Enter folder paths, click Load
 3. **Annotate**: Select class, click on objects (mode `1`)
 4. **Next image**: Press `→` (auto-saves)
@@ -226,14 +223,15 @@ Switching images (← → keys, buttons, jump) triggers auto-save.
 ### Output Structure
 
 ```
-output_folder/
+output/<run-name>/
 ├── images/              ← Annotated image copies
 ├── labels/              ← OBB format (class x1 y1 x2 y2 x3 y3 x4 y4)
 ├── labels_seg/          ← YOLO-Seg polygon format
 ├── masks/               ← PNG masks (if enabled)
-├── coco_annotations.json← COCO JSON (if enabled)
 └── classes.txt          ← Class list
 ```
+
+Input images may be outside the repository or reached through a symbolic link. Output is always written to `fish-labeler/output/<run-name>/`; entering an absolute output path uses only its final directory name.
 
 ---
 
@@ -284,6 +282,5 @@ If you switched images at least once, previous annotations are saved. Reload the
 | **OBB** | Oriented Bounding Box — rotated rectangle with 4 vertices |
 | **Seg** | Segmentation — polygon vertices defining precise boundary |
 | **Mask** | Binary image (0=background, 255=object) |
-| **COCO** | Common Objects in Context — standard JSON annotation format |
 | **SAM** | Segment Anything Model by Meta |
 | **QPainter** | Qt framework's rendering engine for vector graphics |

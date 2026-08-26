@@ -2,12 +2,12 @@
 # Remember to update the version of the ruff-pre-commit repo when you update Ruff
 repos:
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.10.0
+    rev: 0.11.28
     hooks:
       # Check uv.lock is up to date.
       - id: uv-lock
   - repo: https://github.com/astral-sh/ruff-pre-commit  
-    rev: v0.14.10
+    rev: v0.15.21
     hooks:
       # Run the linter.
       - id: ruff-check
@@ -38,7 +38,21 @@ repos:
               \.env.*\.sample
           )$
   - repo: https://github.com/rohaquinlop/complexipy-pre-commit
-    rev: v4.2.0
+    rev: v7.0.1
     hooks:
       - id: complexipy
-        args: [ --max-complexity-allowed=20 ]
+        args: [ --max-complexity-allowed=20, --suggest-refactors, --failed]
+  - repo: local
+    hooks:
+      - id: docstr-coverage
+        name: Check docstring coverage
+        entry: uv run docstr-coverage src --exclude '.*/src/tests/.*' --fail-under 75 --verbose=2 --skip-file-doc --skip-init
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: pytest-all
+        name: Run full test suite
+        entry: uv run pytest
+        language: system
+        pass_filenames: false
+        always_run: true

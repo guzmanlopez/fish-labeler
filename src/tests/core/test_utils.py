@@ -1,4 +1,7 @@
+"""Tests for core geometric and mask utilities."""
+
 import numpy as np
+
 from core.utils import mask_to_binary_image, point_in_obb
 
 

@@ -1,11 +1,8 @@
-# SAM3 Labeler - Interactive Annotation Tool
+# Fish Labeler
 
-**SAM3 Labeler** is a desktop interactive annotation tool powered by [SAM 3 (Segment Anything Model)](https://github.com/ultralytics/ultralytics). It provides an intuitive interface for creating high-quality image annotations in multiple formats for object detection and segmentation tasks.
+**Fish Labeler** is a desktop annotation tool for fish imagery collected aboard fishing vessels. It uses [SAM 3](https://github.com/ultralytics/ultralytics) to create and refine fish, catch, crew, and vessel-context annotations for detection, segmentation, and tracking datasets.
 
-> **v1 (Gradio)** is available at tag [`v1.0`](../../tree/v1.0).
-> **v2 (PyQt6)** is the current version — a full desktop rewrite with real-time rendering.
-
-[中文使用手冊](docs/USER_MANUAL_zh-TW.md) | [English User Manual](docs/USER_MANUAL_en.md)
+[English User Manual](docs/USER_MANUAL_en.md)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -25,11 +22,11 @@
 │        │                                      │  Overlap  ──●─ 10%      │
 │        │                                      │                          │
 │        │                                      │  Output Formats          │
-│        │                                      │  ☑OBB ☑Seg ☐Mask ☐COCO │
+│        │                                      │  ☑OBB ☑Seg ☐Mask      │
 │        │                                      │                          │
 │        │                                      │  Annotations             │
-│        │                                      │  ■ 1. plastic_bottle    │
-│        │                                      │  ■ 2. foam (selected)   │
+│        │                                      │  ■ 1. tuna              │
+│        │                                      │  ■ 2. swordfish         │
 │        │                                      │                          │
 │        │                                      │  [Class▼] [Apply]        │
 │        │                                      │  [🗑Delete] [Clear All]  │
@@ -43,7 +40,7 @@
 
 - **3 Segmentation Methods** — Point click, box selection, and text prompt
 - **AI-Powered** — SAM 3 automatically generates precise segmentation masks
-- **Multi-Format Output** — YOLO OBB, YOLO-Seg, PNG Mask, COCO JSON
+- **Multi-Format Output** — YOLO OBB, YOLO-Seg, and PNG masks
 - **Real-Time Rendering** — QPainter vector canvas with millisecond-level interaction
 - **Zoom & Pan** — Scroll wheel zoom, right-click / Space+click / middle-click pan
 - **Hover Highlight** — Dashed outline on hover, cyan highlight on selection
@@ -54,21 +51,11 @@
 - **Dynamic Classes** — Add/remove annotation classes on the fly
 - **Dark Theme** — Eye-friendly desktop interface built with PyQt6
 
-## v2 Highlights (vs v1 Gradio)
-
-| Action | Gradio (v1) | PyQt6 (v2) |
-|--------|-------------|------------|
-| Click → redraw | 300-500 ms | < 5 ms |
-| Hover highlight | Not supported | < 3 ms |
-| Box drag | No feedback | Real-time |
-| SAM inference | UI freezes | Background thread |
-| Zoom / Pan | Not supported | Scroll + drag |
-
 ## Quick Start
 
 ### 1. Install Dependencies
 
-**Prerequisites**: Python 3.10+, GPU recommended (NVIDIA CUDA / Apple MPS)
+**Prerequisites**: Python 3.12+, [uv](https://docs.astral.sh/uv/), and an NVIDIA GPU for practical SAM inference.
 
 ```bash
 # Install PyTorch first (choose your CUDA version)
@@ -76,8 +63,8 @@
 # Example for CUDA 12.8:
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 
-# Install other dependencies
-pip install PyQt6 opencv-python numpy ultralytics
+# Install the locked project dependencies
+uv sync --locked --all-extras --dev
 ```
 
 ### 2. Download SAM 3 Model
@@ -90,7 +77,7 @@ The SAM 3 model file (`sam3.pt`, ~3.4 GB) is **not included** in this repository
 2. **Request access** (approval required by Meta)
 3. Once approved, download `sam3.pt`:
    - Direct link: https://huggingface.co/facebook/sam3/resolve/main/sam3.pt?download=true
-4. Place `sam3.pt` in the **project root directory** (same folder as `main.py`)
+4. Place `sam3.pt` at `src/models/sam3.pt`
 
 | Model | Size | Source |
 |-------|------|--------|
@@ -115,9 +102,13 @@ The SAM 3 model file (`sam3.pt`, ~3.4 GB) is **not included** in this repository
 ### 3. Run
 
 ```bash
-python main.py --model /path/to/sam3.pt
-python main.py --model sam3.pt --images ./images --output ./output
+uv run fish-labeler app
+uv run fish-labeler app --images /data/vessel-trip-01/images --output vessel-trip-01
+uv run fish-labeler app --model /path/to/another-model.pt
+uv run fish-labeler video --video /data/vessel-trip-01.mp4 --output-dir vessel-trip-01
 ```
+
+`--output` is a run name. All generated files stay under this repository at `output/<run-name>/`, even when input images are in an external or linked directory. A legacy absolute output path is reduced to its final directory name.
 
 ## Three Annotation Modes
 
@@ -133,28 +124,22 @@ SAM3 Labeler supports 4 output formats simultaneously:
 
 ### YOLO OBB (Oriented Bounding Box)
 ```
-output/labels/image_name.txt
+output/<run-name>/labels/image_name.txt
 # class_id x1 y1 x2 y2 x3 y3 x4 y4 (normalized coordinates)
 0 0.512 0.234 0.612 0.234 0.612 0.456 0.512 0.456
 ```
 
 ### YOLO-Seg (Polygon Segmentation)
 ```
-output/labels_seg/image_name.txt
+output/<run-name>/labels_seg/image_name.txt
 # class_id x1 y1 x2 y2 ... xn yn (normalized polygon coordinates)
 0 0.512 0.234 0.534 0.245 0.556 0.267 ...
 ```
 
 ### PNG Mask
 ```
-output/masks/image_name.png
+output/<run-name>/masks/image_name.png
 # Binary mask image (0 = background, 255 = object)
-```
-
-### COCO JSON
-```
-output/coco_annotations.json
-# Standard COCO format with polygon annotations
 ```
 
 ## Keyboard Shortcuts
@@ -177,20 +162,23 @@ output/coco_annotations.json
 ## Project Structure
 
 ```
-sam3-labeler/
-├── main.py              # Entry point
-├── requirements.txt
+fish-labeler/
+├── pyproject.toml        # Commands and dependency configuration
 ├── docs/
-│   ├── USER_MANUAL_en.md
-│   └── USER_MANUAL_zh-TW.md
-├── core/
-│   ├── state.py         # LabelingState
-│   ├── utils.py         # Coordinate transforms, overlap detection
-│   ├── io_manager.py    # Config, progress, label I/O
-│   └── sam_engine.py    # SAM 3 model wrapper
-└── ui/
-    ├── canvas.py        # QPainter vector canvas
-    └── main_window.py   # Main window + control panels
+│   └── USER_MANUAL_en.md
+├── output/               # All generated run directories
+└── src/
+    ├── main.py          # CLI workflows: app and video
+    ├── config/          # Local classes, progress, and UI settings
+    ├── models/           # SAM model weights
+    ├── core/
+    │   ├── state.py         # LabelingState
+    │   ├── utils.py         # Coordinate transforms, overlap detection
+    │   ├── io_manager.py    # Config, progress, label I/O
+    │   └── sam_engine.py    # SAM 3 model wrapper
+    └── ui/
+        ├── canvas.py        # QPainter vector canvas
+        └── main_window.py   # Main window + control panels
 ```
 
 ## System Requirements
@@ -212,7 +200,7 @@ sam3-labeler/
 ```
 Error: SAM model not found
 ```
-**Solution**: Ensure `sam3.pt` is in the project root or specify the path with `--model /path/to/sam3.pt`.
+**Solution**: Ensure `sam3.pt` is at `src/models/sam3.pt` or specify `--model /path/to/sam3.pt`.
 
 ### CUDA out of memory
 ```
@@ -225,10 +213,6 @@ Check the tool is set to Click mode (`1`). Verify cursor is within the image (co
 
 ### SAM inference takes long
 First inference loads the model (10-30s). Subsequent runs take 1-3s. UI remains responsive during inference.
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 

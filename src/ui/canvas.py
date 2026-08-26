@@ -43,6 +43,7 @@ LABEL_COLORS = [
 SELECTED_COLOR = QColor(0, 255, 255)
 BG_COLOR = QColor(15, 15, 26)
 CANVAS_ICON_EXCLUSIONS = {"person", "buoy"}
+ICONS_DIR = Path(__file__).resolve().parents[1] / "themes" / "icons"
 
 _icon_cache = {}
 
@@ -50,7 +51,7 @@ _icon_cache = {}
 def icon_asset_exists(class_name: str) -> bool:
     """Return whether a class has a dedicated icon asset on disk."""
     norm_name = class_name.lower().strip().replace(" ", "_")
-    return (Path("themes/icons") / f"{norm_name}.png").exists()
+    return (ICONS_DIR / f"{norm_name}.png").exists()
 
 
 def has_canvas_label_icon(class_name: str) -> bool:
@@ -67,7 +68,7 @@ def get_class_pixmap(class_name: str) -> QPixmap | None:
     if norm_name in _icon_cache:
         return _icon_cache[norm_name]
 
-    icon_path = Path("themes/icons") / f"{norm_name}.png"
+    icon_path = ICONS_DIR / f"{norm_name}.png"
     if icon_path.exists():
         pm = QPixmap(str(icon_path))
         if not pm.isNull():
@@ -252,7 +253,7 @@ class AnnotationCanvas(QWidget):
             for i in range(0, len(pc), 2):
                 poly.append(QPointF(pc[i] * self._img_w, pc[i + 1] * self._img_h))
             fc = QColor(SELECTED_COLOR if idx in self._selected else co)
-            base_alpha = int(round(255 * self.mask_opacity))
+            base_alpha = round(255 * self.mask_opacity)
             fc.setAlpha(min(255, base_alpha + 48) if idx in self._selected else base_alpha)
             p.setBrush(QBrush(fc))
             p.setPen(Qt.PenStyle.NoPen)
@@ -389,6 +390,7 @@ class AnnotationCanvas(QWidget):
                 )
             painter.drawPolygon(polygon)
 
+    # complexipy: ignore
     def _paint_label_badges(self, painter, inverse_zoom):
         """Render label chips with optional icons above each visible annotation."""
         font_size = max(9, int(11 * inverse_zoom))

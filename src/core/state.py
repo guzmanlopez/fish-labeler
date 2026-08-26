@@ -1,8 +1,7 @@
-from pathlib import Path
-
-from core.sam_engine import DEFAULT_SAM_CONF
-
 """Annotation state model for the labeling workflow."""
+
+from core.io_manager import resolve_output_folder
+from core.sam_engine import DEFAULT_SAM_CONF
 
 
 class LabelingState:
@@ -21,10 +20,11 @@ class LabelingState:
         self.current_labels = []
         self.image_list = []  # List[Path]
         self.current_index = 0
+        self.unsaved_changes = False
         self.classes = ["fish"]
         self.sam_predictor = None  # SAM3SemanticPredictor
         self.sam_model = None  # SAM model (click/box)
-        self.output_folder = Path("labeled_dataset")
+        self.output_folder = resolve_output_folder()
         # Box selection state
         self.box_first_point = None
         # Queued point prompts for interactive SAM point segmentation
@@ -40,7 +40,6 @@ class LabelingState:
             "obb": False,
             "seg": True,
             "mask": False,
-            "coco": False,
         }
         # Polygon simplification
         self.polygon_epsilon = 0.005

@@ -4,6 +4,7 @@ Preserves original load_sam3_model / load_sam_model logic
 """
 
 import os
+from pathlib import Path
 
 import cv2
 
@@ -18,6 +19,7 @@ from core.utils import (
 )
 
 DEFAULT_SAM_CONF = 0.25
+DEFAULT_MODEL_PATH = Path(__file__).resolve().parents[1] / "models" / "sam3.pt"
 
 
 class SAMEngine:
@@ -25,7 +27,7 @@ class SAMEngine:
 
     """Wrapper for SAM 3 model operations"""
 
-    def __init__(self, model_path="sam3.pt", device="cuda:0"):
+    def __init__(self, model_path=DEFAULT_MODEL_PATH, device="cuda:0"):
         """Docstring for __init__."""
         self.model_path = model_path
         self.device = device

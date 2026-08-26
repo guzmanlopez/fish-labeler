@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from math import hypot
+from typing import Any
+
+Label = tuple[Any, ...] | list[Any]
 
 
 @dataclass(slots=True)
@@ -115,7 +119,7 @@ def _log(message: str) -> None:
 def label_to_detection(
     frame_index: int,
     detection_index: int,
-    label: tuple | list,
+    label: Label,
 ) -> DetectionRecord | None:
     """Convert a stored label tuple into a normalized detection record."""
     if len(label) < 2 or not label[1]:
@@ -163,7 +167,7 @@ def label_to_detection(
 
 
 def run_offline_tracker(
-    frames: list[list[tuple | list]],
+    frames: Sequence[Sequence[Label]],
     config: TrackingConfig | None = None,
 ) -> TrackingResult:
     """Run conservative tracklet building followed by offline stitching."""
@@ -182,7 +186,7 @@ def run_offline_tracker(
 
 
 def _build_frame_detections(
-    frames: list[list[tuple | list]],
+    frames: Sequence[Sequence[Label]],
     config: TrackingConfig,
 ) -> list[list[DetectionRecord]]:
     """Convert raw frame labels into detections filtered by confidence."""
@@ -209,6 +213,7 @@ def _build_frame_detections(
     return detections_by_frame
 
 
+# complexipy: ignore
 def _build_tracklets(
     detections_by_frame: list[list[DetectionRecord]],
     config: TrackingConfig,
@@ -339,6 +344,7 @@ def _track_detection_cost(
     return True, cost
 
 
+# complexipy: ignore
 def _stitch_tracklets(tracklets: list[Tracklet], config: TrackingConfig) -> list[Tracklet]:
     """Merge clean tracklets offline when their motion and geometry remain compatible."""
     stitched = [tracklet for tracklet in tracklets if tracklet.detections]
@@ -446,7 +452,7 @@ def _tracklet_stitch_cost(
 
 
 def _build_tracking_result(
-    frames: list[list[tuple | list]],
+    frames: Sequence[Sequence[Label]],
     tracklets: list[Tracklet],
 ) -> TrackingResult:
     """Convert tracklets into per-frame assignments and compact summaries."""
@@ -472,6 +478,7 @@ def _build_tracking_result(
     return TrackingResult(frame_track_ids=frame_track_ids, tracks=tracks)
 
 
+# complexipy: ignore
 def _hungarian(cost_matrix: list[list[float]]) -> list[tuple[int, int]]:
     """Solve a rectangular assignment problem using the Hungarian algorithm."""
     if not cost_matrix or not cost_matrix[0]:

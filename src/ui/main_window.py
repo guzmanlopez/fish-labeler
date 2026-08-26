@@ -41,11 +41,12 @@ from core.io_manager import (
     load_progress,
     load_tracking_data,
     persist_classes,
+    resolve_output_folder,
     save_config,
     save_progress,
     save_tracking_data,
 )
-from core.sam_engine import SAMEngine
+from core.sam_engine import DEFAULT_MODEL_PATH, SAMEngine
 from core.state import LabelingState
 from core.tracker import TrackingConfig, run_offline_tracker
 from ui.canvas import LABEL_COLORS, AnnotationCanvas, get_class_icon, icon_asset_exists
@@ -207,9 +208,11 @@ class CollapsibleSection(QWidget):
             self.line.setStyleSheet("background-color: #363A4F; max-height: 1px; border: none;")
 
     def addWidget(self, widget, stretch=0):
+        """Add a widget to the collapsible section body."""
         self.content_layout.addWidget(widget, stretch)
 
     def addLayout(self, layout):
+        """Add a layout to the collapsible section body."""
         self.content_layout.addLayout(layout)
 
 
@@ -232,7 +235,7 @@ class SAMWorker(QThread):
         try:
             result = self._func(*self._args)
             self.finished.emit(result, "")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             traceback.print_exc()
             self.finished.emit(None, str(e))
 
@@ -243,7 +246,7 @@ class SAMWorker(QThread):
 class MainWindow(QMainWindow):
     """Main application window for browsing images and refining annotations."""
 
-    def __init__(self, sam_model_path="sam3.pt"):
+    def __init__(self, sam_model_path=DEFAULT_MODEL_PATH):
         """Build the labeling UI and wire the canvas, sidebars, and shortcuts."""
         super().__init__()
         self.setWindowTitle("Fish Labeler")
@@ -346,12 +349,10 @@ class MainWindow(QMainWindow):
         self.visual_seg_sec = CollapsibleSection("Visual prompt:")
         self.mode_group = QButtonGroup(self)
         self.mode_group.addButton(self.selection_btn, 2)
-        for i, (label, mode, tip) in enumerate(
-            [
-                ("Point", "point", "Single object instance using a point (1)"),
-                ("Box", "box", "Single object instance using a box (2)"),
-            ]
-        ):
+        for i, (label, mode, tip) in enumerate([
+            ("Point", "point", "Single object instance using a point (1)"),
+            ("Box", "box", "Single object instance using a box (2)"),
+        ]):
             rb = QRadioButton(label)
             rb.setProperty("mode", mode)
             rb.setToolTip(tip)
@@ -536,13 +537,11 @@ class MainWindow(QMainWindow):
         self.fmt_seg = QCheckBox("YOLO-Seg (Polygon)")
         self.fmt_seg.setChecked(True)
         self.fmt_mask = QCheckBox("PNG Mask")
-        self.fmt_coco = QCheckBox("COCO JSON")
         self.fmt_obb = QCheckBox("OBB (Oriented Bounding Box)")
         self.fmt_seg.setToolTip("Save visible annotations as YOLO segmentation polygons.")
         self.fmt_mask.setToolTip("Save visible annotations as a per-pixel indexed mask image.")
-        self.fmt_coco.setToolTip("Save visible annotations in COCO-style JSON format when enabled.")
         self.fmt_obb.setToolTip("Save visible annotations as oriented bounding boxes.")
-        for cb in (self.fmt_seg, self.fmt_mask, self.fmt_coco, self.fmt_obb):
+        for cb in (self.fmt_seg, self.fmt_mask, self.fmt_obb):
             cb.stateChanged.connect(self._fmt_changed)
             self.settings_sec.addWidget(cb)
 
@@ -569,7 +568,7 @@ class MainWindow(QMainWindow):
             "Ignore very weak detections before building tracklets.",
             "confidence_threshold",
             100,
-            lambda value: f"{int(round(value * 100))}%",
+            lambda value: f"{round(value * 100)}%",
         )
         self.track_iou_slider, self.track_iou_label = self._add_tracking_slider_control(
             self.track_linking_sec,
@@ -591,7 +590,7 @@ class MainWindow(QMainWindow):
             "Maximum normalized center displacement between nearby frames.",
             "max_center_distance",
             100,
-            lambda value: f"{int(round(value * 100))}%",
+            lambda value: f"{round(value * 100)}%",
         )
         self.track_missed_slider, self.track_missed_label = self._add_tracking_slider_control(
             self.track_linking_sec,
@@ -614,7 +613,7 @@ class MainWindow(QMainWindow):
             "Reject links that change box scale too abruptly.",
             "max_size_change",
             100,
-            lambda value: f"{int(round(value * 100))}%",
+            lambda value: f"{round(value * 100)}%",
         )
         self.track_aspect_slider, self.track_aspect_label = self._add_tracking_slider_control(
             self.track_linking_sec,
@@ -625,7 +624,7 @@ class MainWindow(QMainWindow):
             "Reject links with strong box shape changes.",
             "max_aspect_change",
             100,
-            lambda value: f"{int(round(value * 100))}%",
+            lambda value: f"{round(value * 100)}%",
         )
         self.track_velocity_slider, self.track_velocity_label = self._add_tracking_slider_control(
             self.track_linking_sec,
@@ -664,7 +663,7 @@ class MainWindow(QMainWindow):
             "Maximum predicted center mismatch for offline stitching.",
             "stitch_center_distance",
             100,
-            lambda value: f"{int(round(value * 100))}%",
+            lambda value: f"{round(value * 100)}%",
         )
         self.stitch_size_slider, self.stitch_size_label = self._add_tracking_slider_control(
             self.track_stitching_sec,
@@ -675,7 +674,7 @@ class MainWindow(QMainWindow):
             "Maximum relative size drift allowed for stitching tracklets.",
             "stitch_size_change",
             100,
-            lambda value: f"{int(round(value * 100))}%",
+            lambda value: f"{round(value * 100)}%",
         )
         self.stitch_aspect_slider, self.stitch_aspect_label = self._add_tracking_slider_control(
             self.track_stitching_sec,
@@ -686,7 +685,7 @@ class MainWindow(QMainWindow):
             "Maximum aspect-ratio drift allowed during stitching.",
             "stitch_aspect_change",
             100,
-            lambda value: f"{int(round(value * 100))}%",
+            lambda value: f"{round(value * 100)}%",
         )
         self.stitch_penalty_slider, self.stitch_penalty_label = self._add_tracking_slider_control(
             self.track_stitching_sec,
@@ -747,7 +746,7 @@ class MainWindow(QMainWindow):
             "Remove the selected track ID from every frame without deleting the detections themselves."
         )
         delete_track_btn.clicked.connect(self._delete_selected_track)
-        clear_tracks_btn = QPushButton("Clear")
+        clear_tracks_btn = QPushButton("Clear tracks")
         clear_tracks_btn.setToolTip("Remove all track assignments from the loaded sequence.")
         clear_tracks_btn.clicked.connect(self._clear_tracks)
         track_actions_row.addWidget(delete_track_btn)
@@ -876,7 +875,7 @@ class MainWindow(QMainWindow):
         save_btn = QPushButton("Save")
         save_btn.setObjectName("primaryBtn")
         save_btn.setToolTip(
-            "Save only the annotations currently visible under the active filters. Ctrl+S shortcut."
+            "Save only the visible annotations under the active filters. Ctrl+S shortcut."
         )
         save_btn.clicked.connect(self._save_labels)
         self.anno_sec.addWidget(save_btn)
@@ -917,7 +916,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("R"), self, self._segment_text)
 
         # ======= Style =======
-        theme_path = Path("themes/dark.qss")
+        theme_path = Path(__file__).resolve().parents[1] / "themes" / "dark.qss"
         if theme_path.exists():
             with open(theme_path, "r", encoding="utf-8") as f:
                 self.setStyleSheet(f.read())
@@ -953,6 +952,7 @@ class MainWindow(QMainWindow):
         section.addLayout(row)
 
         def _on_value_changed(raw_value):
+            """Store and display the normalized value selected by the slider."""
             converted = cast(raw_value if scale == 1 else raw_value / scale)
             self.state.tracking_config[key] = converted
             label.setText(formatter(converted))
@@ -1165,9 +1165,9 @@ class MainWindow(QMainWindow):
             item.setData(ANNOTATION_COLOR_ROLE, QColor(color))
             if has_annotation_icon(class_name):
                 item.setIcon(get_class_icon(class_name, color))
+            self.track_list.addItem(item)
             if track_id in self.state.selected_track_ids:
                 item.setSelected(True)
-            self.track_list.addItem(item)
         self.track_list.blockSignals(False)
 
     def _next_track_id(self):
@@ -1199,7 +1199,7 @@ class MainWindow(QMainWindow):
         if not self.state.image_list:
             self._set_status("Load a frame sequence before running tracking")
             return
-        self.state.output_folder = Path(self.output_input.text().strip() or "output")
+        self.state.output_folder = resolve_output_folder(self.output_input.text())
         print(
             f"[tracking] requested run for {len(self.state.image_list)} frames in {self.state.output_folder}",
             flush=True,
@@ -1323,6 +1323,9 @@ class MainWindow(QMainWindow):
 
     def _merge_selected_tracks(self):
         """Merge the selected track ids into the lowest selected track id."""
+        self.state.selected_track_ids = {
+            item.data(TRACK_ITEM_ROLE) for item in self.track_list.selectedItems()
+        }
         selected_track_ids = sorted(
             track_id for track_id in self.state.selected_track_ids if track_id
         )
@@ -1382,14 +1385,14 @@ class MainWindow(QMainWindow):
 
     def _browse_output_folder(self):
         """Docstring for _browse_output_folder."""
-        d = QFileDialog.getExistingDirectory(self, "Select output folder")
+        d = QFileDialog.getExistingDirectory(self, "Select run directory name")
         if d:
-            self.output_input.setText(d)
+            self.output_input.setText(Path(d).name)
 
     def _load_folder(self):
         """Docstring for _load_folder."""
         fp = self.folder_input.text().strip()
-        op = self.output_input.text().strip() or "output"
+        op = self.output_input.text().strip() or "default"
         if not fp:
             self._set_status("Please enter a folder path")
             return
@@ -1399,7 +1402,7 @@ class MainWindow(QMainWindow):
             self._set_status("No images found in folder")
             return
         self.state.image_list = imgs
-        self.state.output_folder = Path(op)
+        self.state.output_folder = resolve_output_folder(op)
         save_config(fp, op)
         self._load_tracking_state()
         self._refresh_track_list()
@@ -1446,7 +1449,7 @@ class MainWindow(QMainWindow):
         """Docstring for _nav."""
         if not self.state.image_list:
             return
-        self.state.output_folder = Path(self.output_input.text().strip() or "output")
+        self.state.output_folder = resolve_output_folder(self.output_input.text())
         self._sync_current_frame_track_ids()
         auto_save_labels(self.state)
         self._save_tracking_state()
@@ -1472,7 +1475,7 @@ class MainWindow(QMainWindow):
             return
         if not self.state.image_list or not (0 <= idx < len(self.state.image_list)):
             return
-        self.state.output_folder = Path(self.output_input.text().strip() or "output")
+        self.state.output_folder = resolve_output_folder(self.output_input.text())
         self._sync_current_frame_track_ids()
         auto_save_labels(self.state)
         self._save_tracking_state()
@@ -1806,10 +1809,13 @@ class MainWindow(QMainWindow):
 
     def _apply_point_prompt_persistence(self):
         """Clear only the prompt types that are not configured to persist."""
+        self.state.keep_positive_points_across_frames = self.keep_positive_points_cb.isChecked()
+        self.state.keep_negative_points_across_frames = self.keep_negative_points_cb.isChecked()
         if not self.state.keep_positive_points_across_frames:
             self.state.positive_prompt_points.clear()
         if not self.state.keep_negative_points_across_frames:
             self.state.negative_prompt_points.clear()
+        self._refresh_point_prompt_ui()
 
     def _clear_point_prompts(self, announce=True):
         """Clear queued positive and negative point prompts for the current frame."""
@@ -1883,7 +1889,6 @@ class MainWindow(QMainWindow):
         self.state.output_formats["obb"] = self.fmt_obb.isChecked()
         self.state.output_formats["seg"] = self.fmt_seg.isChecked()
         self.state.output_formats["mask"] = self.fmt_mask.isChecked()
-        self.state.output_formats["coco"] = self.fmt_coco.isChecked()
 
     # ==================================================================
     # Annotation operations
@@ -1969,7 +1974,7 @@ class MainWindow(QMainWindow):
 
     def _save_labels(self):
         """Docstring for _save_labels."""
-        self.state.output_folder = Path(self.output_input.text().strip() or "output")
+        self.state.output_folder = resolve_output_folder(self.output_input.text())
         self._sync_current_frame_track_ids()
         msg = auto_save_labels(self.state)
         self._save_tracking_state()

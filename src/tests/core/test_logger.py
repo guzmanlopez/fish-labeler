@@ -1,4 +1,7 @@
+"""Tests for application logger initialization."""
+
 import logging
+
 from core.logger import get_logger
 
 

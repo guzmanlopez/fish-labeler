@@ -1,12 +1,15 @@
+"""Tests for configuration, persistence, and annotation output helpers."""
+
 import numpy as np
 
-import core.io_manager as io_manager
+from core import io_manager
 from core.io_manager import (
     auto_save_labels,
     load_config,
     load_persisted_classes,
     load_tracking_data,
     persist_classes,
+    resolve_output_folder,
     save_config,
     save_tracking_data,
 )
@@ -21,6 +24,16 @@ def test_load_save_config(tmp_path):
     config = load_config()
     assert config["images_folder"] == "test_in"
     assert config["output_folder"] == "test_out"
+
+
+def test_resolve_output_folder_keeps_runs_below_repository_output():
+    """Ensure user-supplied paths cannot escape the repository output root."""
+    assert resolve_output_folder("vessel-trip-01") == io_manager.OUTPUT_ROOT / "vessel-trip-01"
+    assert (
+        resolve_output_folder("/external/data/vessel-trip-02")
+        == io_manager.OUTPUT_ROOT / "vessel-trip-02"
+    )
+    assert resolve_output_folder("output") == io_manager.OUTPUT_ROOT / "default"
 
 
 def test_persist_classes(tmp_path):

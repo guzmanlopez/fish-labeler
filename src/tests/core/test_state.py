@@ -1,3 +1,5 @@
+"""Tests for mutable labeling workflow state."""
+
 from pathlib import Path
 
 from core.sam_engine import DEFAULT_SAM_CONF

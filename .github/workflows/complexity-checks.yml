@@ -1,0 +1,24 @@
+name: Complexity checks
+
+on: [ pull_request ]
+jobs:
+  complexity-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.0.1
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install the project
+        run: uv sync --locked --all-extras --dev
+
+      - name: Check code complexity with Complexipy
+        uses: rohaquinlop/complexipy-action@v7.0.1
+        with:
+          paths: '.'
+          max_complexity_allowed: 20

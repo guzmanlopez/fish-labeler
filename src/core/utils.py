@@ -6,6 +6,7 @@ obb_intersects_box, find_labels_in_box, create_coco_annotation, create_coco_data
 """
 
 import json
+from typing import cast
 
 import cv2
 import numpy as np
@@ -27,7 +28,7 @@ def mask_to_obb(mask, img_width, img_height):
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return None
-    largest_contour = max(contours, key=cv2.contourArea)
+    largest_contour = max(cast(list[np.ndarray], contours), key=cv2.contourArea)
     if cv2.contourArea(largest_contour) < 100:
         return None
     rect = cv2.minAreaRect(largest_contour)
@@ -52,7 +53,7 @@ def mask_to_polygon(mask, img_width, img_height, epsilon_ratio=0.005):
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return None
-    largest_contour = max(contours, key=cv2.contourArea)
+    largest_contour = max(cast(list[np.ndarray], contours), key=cv2.contourArea)
     if cv2.contourArea(largest_contour) < 100:
         return None
     epsilon = epsilon_ratio * cv2.arcLength(largest_contour, True)
@@ -173,12 +174,10 @@ def box_to_obb(x1, y1, x2, y2, img_w, img_h):
     ]
     normalized_box = []
     for px, py in points:
-        normalized_box.extend(
-            [
-                max(0, min(1, px / img_w)),
-                max(0, min(1, py / img_h)),
-            ]
-        )
+        normalized_box.extend([
+            max(0, min(1, px / img_w)),
+            max(0, min(1, py / img_h)),
+        ])
     return normalized_box
 
 
@@ -308,9 +307,12 @@ def create_coco_dataset(image_list, labels_dict, classes, output_path):
         if img is None:
             continue
         img_h, img_w = img.shape[:2]
-        coco_data["images"].append(
-            {"id": img_id, "file_name": img_name, "width": img_w, "height": img_h}
-        )
+        coco_data["images"].append({
+            "id": img_id,
+            "file_name": img_name,
+            "width": img_w,
+            "height": img_h,
+        })
         if img_name in labels_dict:
             for class_id, polygon_coords in labels_dict[img_name]:
                 if polygon_coords and len(polygon_coords) >= 6:
