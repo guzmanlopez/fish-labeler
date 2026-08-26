@@ -1,40 +1,8 @@
 # Fish Labeler
 
-**Fish Labeler** is a desktop annotation tool for fish imagery collected aboard fishing vessels. It uses [SAM 3](https://github.com/ultralytics/ultralytics) to create and refine fish, catch, crew, and vessel-context annotations for detection, segmentation, and tracking datasets.
+**Fish Labeler** prepares and annotates fish imagery collected aboard fishing vessels. Use the video workflow to sample frames and create an initial YOLO segmentation dataset, then use the Qt workflow to review and refine annotations.
 
 [English User Manual](docs/USER_MANUAL_en.md)
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│  SAM3  [Image Folder] [📁] [Output Folder]  [Load] │ [N] [Go]  7/13   │
-├────────┬──────────────────────────────────────┬──────────────────────────┤
-│        │                                      │                          │
-│ Tools  │                                      │  Text Prompt             │
-│        │                                      │  [input] [▶ Run]         │
-│ ○ Click│                                      │                          │
-│ ○ Box  │          Canvas                      │  Class                   │
-│ ○ Select│                                     │  [dropdown] [+] [−]      │
-│        │     (scroll zoom / right-click pan)  │                          │
-│        │     (coords at bottom-left)          │  Settings                │
-│ [⊞ Fit]│                                      │  ☑ Fallback to box      │
-│ [◀Prev]│                                      │  ○outline ○mask ○both   │
-│ [Next▶]│                                      │  Simplify ─●── 0.005    │
-│        │                                      │  Overlap  ──●─ 10%      │
-│        │                                      │                          │
-│        │                                      │  Output Formats          │
-│        │                                      │  ☑OBB ☑Seg ☐Mask      │
-│        │                                      │                          │
-│        │                                      │  Annotations             │
-│        │                                      │  ■ 1. tuna              │
-│        │                                      │  ■ 2. swordfish         │
-│        │                                      │                          │
-│        │                                      │  [Class▼] [Apply]        │
-│        │                                      │  [🗑Delete] [Clear All]  │
-│        │                                      │  [💾 Save]              │
-├────────┴──────────────────────────────────────┴──────────────────────────┤
-│ 📷 7/13  🏷️ 5 annotations  |  frame_006.jpg                            │
-└─────────────────────────────────────────────────────────────────────────┘
-```
 
 ## Features
 
@@ -67,37 +35,30 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 uv sync --locked --all-extras --dev
 ```
 
-### 2. Download SAM 3 Model
+### 2. Download SAM 3 From Hugging Face
 
-The SAM 3 model file (`sam3.pt`, ~3.4 GB) is **not included** in this repository. You must **manually download** it from Hugging Face.
+The SAM 3 weights (`sam3.pt`, about 3.4 GB) are not included in this repository. Meta gates the [facebook/sam3 model repository](https://huggingface.co/facebook/sam3), so the Hugging Face account used to download the file must be approved first.
 
-**Download Steps**:
+1. Sign in to Hugging Face and open the [SAM 3 model page](https://huggingface.co/facebook/sam3).
+2. Select **Request access**, accept the model terms, and wait for Meta approval.
+3. After approval, download `sam3.pt` from the repository's **Files and versions** tab.
+4. Place the downloaded file at `src/models/sam3.pt`.
 
-1. Visit the [SAM 3 model page on Hugging Face](https://huggingface.co/facebook/sam3)
-2. **Request access** (approval required by Meta)
-3. Once approved, download `sam3.pt`:
-   - Direct link: https://huggingface.co/facebook/sam3/resolve/main/sam3.pt?download=true
-4. Place `sam3.pt` at `src/models/sam3.pt`
+Alternatively, download directly to the expected directory with the Hugging Face CLI. Authenticate with a token for an account approved to access `facebook/sam3`:
 
-| Model | Size | Source |
-|-------|------|--------|
-| `sam3.pt` | ~3.4 GB | [Hugging Face - facebook/sam3](https://huggingface.co/facebook/sam3) |
+```bash
+uv tool install "huggingface_hub[cli]"
+hf auth login
+hf download facebook/sam3 sam3.pt --local-dir src/models
+```
 
-> **Alternative**: You can also use SAM 2 models which do **not** require access approval:
->
-> | Model | Size | Source |
-> |-------|------|--------|
-> | `sam2_t.pt` | ~150 MB | Auto-download via Ultralytics |
-> | `sam2_s.pt` | ~180 MB | Auto-download via Ultralytics |
-> | `sam2_b.pt` | ~350 MB | Auto-download via Ultralytics |
-> | `sam2_l.pt` | ~900 MB | Auto-download via Ultralytics |
->
-> SAM 2 models are downloaded automatically on first use. See [Ultralytics SAM 2 Docs](https://docs.ultralytics.com/models/sam-2/).
+Verify the file before starting a workflow:
 
-**Reference**:
-- [Ultralytics SAM 3 Docs](https://docs.ultralytics.com/models/sam-3/)
-- [Ultralytics SAM 2 Docs](https://docs.ultralytics.com/models/sam-2/)
-- [Ultralytics SAM (Original) Docs](https://docs.ultralytics.com/models/sam/)
+```bash
+test -f src/models/sam3.pt && echo "SAM 3 model ready"
+```
+
+See the [Ultralytics SAM 3 documentation](https://docs.ultralytics.com/models/sam-3/) for model details and hardware guidance.
 
 ### 3. Run
 
@@ -108,7 +69,7 @@ uv run fish-labeler app --model /path/to/another-model.pt
 uv run fish-labeler video --video /data/vessel-trip-01.mp4 --output-dir vessel-trip-01
 ```
 
-`--output` is a run name. All generated files stay under this repository at `output/<run-name>/`, even when input images are in an external or linked directory. A legacy absolute output path is reduced to its final directory name.
+`fish-labeler video` writes sampled images and initial labels to `output/<run-name>/`. Open those images in the Qt application with `fish-labeler app --images output/<run-name>/images --output <run-name>` to review and refine the dataset. All generated files stay under the repository `output/` directory, even when source media is external or linked.
 
 ## Three Annotation Modes
 
@@ -120,7 +81,7 @@ uv run fish-labeler video --video /data/vessel-trip-01.mp4 --output-dir vessel-t
 
 ## Output Formats
 
-SAM3 Labeler supports 4 output formats simultaneously:
+Fish Labeler supports three output formats simultaneously:
 
 ### YOLO OBB (Oriented Bounding Box)
 ```
