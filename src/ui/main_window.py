@@ -216,6 +216,18 @@ class CollapsibleSection(QWidget):
         self.content_layout.addLayout(layout)
 
 
+class LockedSlider(QSlider):
+    """Slider that can only be adjusted by clicking or dragging its handle."""
+
+    def wheelEvent(self, e):
+        """Consume wheel events without changing the slider value."""
+        e.accept()
+
+    def keyPressEvent(self, ev):
+        """Consume key events without changing the slider value."""
+        ev.accept()
+
+
 # -- SAM Worker --------------------------------------------------------
 
 
@@ -484,7 +496,7 @@ class MainWindow(QMainWindow):
         self.settings_sec.addWidget(self.aabb_cb)
 
         self.settings_sec.addWidget(QLabel("Mask opacity:"))
-        self.mask_opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self.mask_opacity_slider = LockedSlider(Qt.Orientation.Horizontal)
         self.mask_opacity_slider.setRange(15, 100)
         self.mask_opacity_slider.setValue(int(self.state.mask_opacity * 100))
         self.mask_opacity_slider.setToolTip(
@@ -499,7 +511,7 @@ class MainWindow(QMainWindow):
 
         # Polygon simplification slider
         self.settings_sec.addWidget(QLabel("Polygon simplify:"))
-        self.epsilon_slider = QSlider(Qt.Orientation.Horizontal)
+        self.epsilon_slider = LockedSlider(Qt.Orientation.Horizontal)
         self.epsilon_slider.setRange(1, 20)
         self.epsilon_slider.setValue(5)
         self.epsilon_slider.setToolTip("Lower = more precise (0.001~0.020)")
@@ -512,7 +524,7 @@ class MainWindow(QMainWindow):
 
         # Overlap threshold slider
         self.settings_sec.addWidget(QLabel("Overlap threshold:"))
-        self.overlap_slider = QSlider(Qt.Orientation.Horizontal)
+        self.overlap_slider = LockedSlider(Qt.Orientation.Horizontal)
         self.overlap_slider.setRange(0, 50)
         self.overlap_slider.setValue(10)
         self.overlap_slider.setToolTip(
@@ -945,7 +957,7 @@ class MainWindow(QMainWindow):
     ):
         """Create a labeled tracking slider bound to a tracker configuration key."""
         section.addWidget(QLabel(title))
-        slider = QSlider(Qt.Orientation.Horizontal)
+        slider = LockedSlider(Qt.Orientation.Horizontal)
         slider.setRange(minimum, maximum)
         slider.setValue(value)
         slider.setToolTip(tooltip)
@@ -1774,7 +1786,7 @@ class MainWindow(QMainWindow):
             lbl.setFixedWidth(85)
             lbl.setStyleSheet("color: #8B949E; font-size: 11px;")
 
-            slider = QSlider(Qt.Orientation.Horizontal)
+            slider = LockedSlider(Qt.Orientation.Horizontal)
             slider.setRange(1, 100)
             slider.setValue(int(val * 100))
 

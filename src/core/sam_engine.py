@@ -44,7 +44,7 @@ class SAMEngine:
                     conf=DEFAULT_SAM_CONF,
                     model=self.model_path,
                     device=self.device,
-                    half=True,
+                    quantize=16,
                     verbose=False,
                 )
             )

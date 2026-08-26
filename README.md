@@ -143,7 +143,7 @@ fish-labeler/
 | Component | Minimum | Recommended |
 |-----------|---------|-------------|
 | OS | Windows 10 / Ubuntu 20.04 / macOS 12+ | Windows 11 / Ubuntu 22.04 / macOS 14+ |
-| Python | 3.10 | 3.12 |
+| Python | 3.14 | 3.14+ |
 | GPU | NVIDIA GTX 1060 (6GB) / Apple M1 | NVIDIA RTX 3060+ (8GB+) / Apple M2+ |
 | CUDA | 11.7 (macOS uses MPS, no CUDA needed) | 12.1+ |
 | RAM | 8 GB | 16 GB+ |

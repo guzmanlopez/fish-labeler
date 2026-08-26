@@ -1,6 +1,7 @@
 """Tests for the offline tracklet tracker."""
 
-from core.tracker import TrackingConfig, run_offline_tracker
+from core import tracker
+from core.tracker import DetectionRecord, TrackingConfig, Tracklet, run_offline_tracker
 
 
 def make_box(class_id, x1, y1, x2, y2, score=0.9):
@@ -68,3 +69,36 @@ def test_offline_tracker_skips_malformed_boxes_without_crashing():
 
     assert result.frame_track_ids[0] == [None]
     assert result.frame_track_ids[1][0] == 1
+
+
+def test_stitch_tracklets_handles_crossing_simultaneous_merge_indices(monkeypatch):
+    """All selected pairs must be read before replacing their source tracklets."""
+    tracklets = [
+        Tracklet(
+            detections=[
+                DetectionRecord(
+                    frame_index=index,
+                    detection_index=0,
+                    class_id=0,
+                    confidence=0.9,
+                    bbox=(0.1, 0.1, 0.2, 0.2),
+                    center=(0.15, 0.15),
+                    width=0.1,
+                    height=0.1,
+                    aspect_ratio=1.0,
+                    area=0.01,
+                )
+            ]
+        )
+        for index in range(4)
+    ]
+    monkeypatch.setattr(
+        tracker,
+        "_hungarian",
+        lambda cost_matrix: [(0, 3), (1, 2)] if len(cost_matrix) == 4 else [],
+    )
+    monkeypatch.setattr(tracker, "_tracklet_stitch_cost", lambda *_: (True, 0.0))
+
+    stitched = tracker._stitch_tracklets(tracklets, TrackingConfig())
+
+    assert [len(tracklet.detections) for tracklet in stitched] == [2, 2]

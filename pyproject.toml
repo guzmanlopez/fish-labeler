@@ -1,9 +1,9 @@
 [project]
 name = "fish-labeler"
 version = "0.1.0"
-description = "Add your description here"
+description = "Fish Labeler prepares and annotates fish imagery collected aboard fishing vessels."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
     "numpy>=1.24.0",
     "opencv-python>=4.8.0",

@@ -49,7 +49,6 @@ DEFAULT_CLASSES = [
     "shark",
     "stingray",
     "sea turtle",
-    "person",
 ]
 
 
@@ -121,8 +120,8 @@ def add_video_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--frame-step",
         type=int,
-        default=1,
-        help="Process every N frames. Defaults to every frame.",
+        default=6,
+        help="Process every N frames. Defaults to every 6 frames.",
     )
     parser.add_argument(
         "--sample-every-seconds",
@@ -137,10 +136,11 @@ def add_video_arguments(parser: argparse.ArgumentParser) -> None:
         help="Ultralytics device string, for example cuda:0 or cpu.",
     )
     parser.add_argument(
-        "--half",
-        type=str2bool,
-        default=True,
-        help="Enable FP16 if supported. Defaults to automatic selection.",
+        "--quantize",
+        type=int,
+        choices=(16, 32),
+        default=16,
+        help="Inference precision: 16 for FP16 or 32 for FP32. Defaults to FP16.",
     )
     parser.add_argument(
         "--overwrite-frames",
@@ -179,23 +179,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
-def resolve_half_precision(device: str | None, requested_half: bool | None) -> bool:
-    """Docstring for resolve_half_precision."""
-    if requested_half is not None:
-        if requested_half and device == "cpu":
-            LOG.warning("FP16 requested on CPU; disabling half precision.")
-            return False
-        return requested_half
-
-    if device == "cpu":
-        return False
-
-    try:
-        import torch
-
-        return torch.cuda.is_available()
-    except ImportError:
-        return False
+def resolve_quantize(device: str | None, requested_quantize: int) -> int:
+    """Return a supported precision, falling back to FP32 for explicit CPU runs."""
+    if requested_quantize == 16 and device == "cpu":
+        LOG.warning("FP16 requested on CPU; using FP32 instead.")
+        return 32
+    return requested_quantize
 
 
 def build_predictor(model_path: Path, args: argparse.Namespace):
@@ -209,7 +198,7 @@ def build_predictor(model_path: Path, args: argparse.Namespace):
         "mode": "predict",
         "model": str(model_path),
         "imgsz": args.imgsz,
-        "half": resolve_half_precision(args.device, args.half),
+        "quantize": resolve_quantize(args.device, args.quantize),
         "save": False,
         "verbose": False,
         "batch": 1,
@@ -353,7 +342,7 @@ def write_run_config(
         "iou": args.iou,
         "imgsz": args.imgsz,
         "device": args.device,
-        "half": resolve_half_precision(args.device, args.half),
+        "quantize": resolve_quantize(args.device, args.quantize),
         "fps": fps,
         "total_frames": total_frames,
         "sampled_frames": sampled_frames,

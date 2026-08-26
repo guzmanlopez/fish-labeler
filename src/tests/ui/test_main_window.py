@@ -3,10 +3,12 @@
 from pathlib import Path
 
 import numpy as np
-from PyQt6.QtWidgets import QAbstractItemView, QPushButton, QScrollArea
+from PyQt6.QtCore import QPoint, QPointF, Qt
+from PyQt6.QtGui import QWheelEvent
+from PyQt6.QtWidgets import QAbstractItemView, QPushButton, QScrollArea, QSlider
 
 from ui.canvas import LABEL_COLORS, has_canvas_label_icon
-from ui.main_window import ANNOTATION_COLOR_ROLE, MainWindow, has_annotation_icon
+from ui.main_window import ANNOTATION_COLOR_ROLE, LockedSlider, MainWindow, has_annotation_icon
 
 
 class DummySamEngine:
@@ -197,6 +199,33 @@ def test_mask_opacity_slider_updates_canvas(monkeypatch, qtbot):
     assert window.state.mask_opacity == 0.85
     assert window.canvas.mask_opacity == 0.85
     assert window.mask_opacity_label.text() == "85%"
+
+
+def test_sliders_ignore_wheel_and_keypad_input(monkeypatch, qtbot):
+    """Sliders should only change through direct pointer interaction."""
+    window = build_window(monkeypatch, qtbot)
+    sliders = window.findChildren(QSlider)
+
+    assert sliders
+    assert all(isinstance(slider, LockedSlider) for slider in sliders)
+
+    slider = window.mask_opacity_slider
+    original_value = slider.value()
+    qtbot.keyClick(slider, Qt.Key.Key_Right)
+    slider.wheelEvent(
+        QWheelEvent(
+            QPointF(0, 0),
+            QPointF(0, 0),
+            QPoint(),
+            QPoint(0, 120),
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+            Qt.ScrollPhase.NoScrollPhase,
+            False,
+        )
+    )
+
+    assert slider.value() == original_value
 
 
 def test_point_prompt_controls_follow_visual_mode(monkeypatch, qtbot):

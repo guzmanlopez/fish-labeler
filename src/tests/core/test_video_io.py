@@ -1,7 +1,8 @@
 """Tests for the video export helpers and command module imports."""
 
 import json
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -25,14 +26,52 @@ def test_video_command_imports_without_missing_modules():
     assert sam3_video_to_yolo.DEFAULT_MODEL_PATH.name == "sam3.pt"
 
 
-def test_video_workflow_defaults_to_every_frame():
-    """A five-minute 12 FPS source should select all 3,600 frames by default."""
+def test_video_workflow_uses_configured_default_frame_step():
+    """The default frame interval should control the selected video frames."""
     args = sam3_video_to_yolo.parse_args(["--video", "source.mp4", "--output-dir", "run"])
 
-    assert args.frame_step == 1
+    assert args.frame_step == 6
     assert sam3_video_to_yolo.frame_indices_for_video(300 * 12, args.frame_step, None) == list(
-        range(300 * 12)
+        range(0, 300 * 12, 6)
     )
+
+
+def test_video_precision_uses_quantize_and_cpu_falls_back_to_fp32():
+    """Video inference should use the current Ultralytics precision option."""
+    args = sam3_video_to_yolo.parse_args([
+        "--video",
+        "source.mp4",
+        "--output-dir",
+        "run",
+        "--device",
+        "cpu",
+    ])
+
+    assert args.quantize == 16
+    assert sam3_video_to_yolo.resolve_quantize(args.device, args.quantize) == 32
+
+
+def test_build_predictor_passes_quantize_not_half(monkeypatch, tmp_path):
+    """Ultralytics should receive the non-deprecated precision override."""
+    received = {}
+
+    class FakePredictor:
+        def __init__(self, overrides):
+            received.update(overrides)
+
+    ultralytics_models = ModuleType("ultralytics.models")
+    ultralytics_sam = ModuleType("ultralytics.models.sam")
+    ultralytics_sam.SAM3SemanticPredictor = FakePredictor
+    monkeypatch.setitem(sys.modules, "ultralytics.models", ultralytics_models)
+    monkeypatch.setitem(sys.modules, "ultralytics.models.sam", ultralytics_sam)
+
+    sam3_video_to_yolo.build_predictor(
+        tmp_path / "model.pt",
+        SimpleNamespace(conf=0.5, iou=0.5, imgsz=728, device=None, quantize=16),
+    )
+
+    assert received["quantize"] == 16
+    assert "half" not in received
 
 
 def test_yolo_exporter_writes_segmentation_dataset(tmp_path):

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from math import hypot
+from time import perf_counter
 from typing import Any
 
 Label = tuple[Any, ...] | list[Any]
@@ -136,7 +137,7 @@ def label_to_detection(
     coords = coords[:8]
     try:
         coords = [float(value) for value in coords]
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         _log(f"skipping non-numeric detection at frame={frame_index} index={detection_index}")
         return None
 
@@ -172,16 +173,34 @@ def run_offline_tracker(
 ) -> TrackingResult:
     """Run conservative tracklet building followed by offline stitching."""
     tracker_config = config or TrackingConfig()
-    _log(f"starting offline tracking for {len(frames)} frames")
+    total_started_at = perf_counter()
+    _log(f"starting offline tracking: frames={len(frames)}")
+
+    parsing_started_at = perf_counter()
+    _log("phase 1/3: parsing and filtering detections")
     filtered_frames = _build_frame_detections(frames, tracker_config)
     _log(
-        "frame parsing complete: "
-        f"{sum(len(frame) for frame in filtered_frames)} detections kept after confidence filtering"
+        "phase 1/3 complete: "
+        f"kept={sum(len(frame) for frame in filtered_frames)} detections "
+        f"elapsed={perf_counter() - parsing_started_at:.1f}s"
     )
+
+    tracklet_started_at = perf_counter()
+    _log("phase 2/3: associating frame detections into tracklets")
     tracklets = _build_tracklets(filtered_frames, tracker_config)
-    _log(f"pass 1 complete: built {len(tracklets)} tracklets")
+    _log(
+        f"phase 2/3 complete: tracklets={len(tracklets)} "
+        f"elapsed={perf_counter() - tracklet_started_at:.1f}s"
+    )
+
+    stitching_started_at = perf_counter()
+    _log("phase 3/3: stitching compatible tracklets")
     stitched = _stitch_tracklets(tracklets, tracker_config)
-    _log(f"pass 2 complete: stitched down to {len(stitched)} tracks")
+    _log(
+        f"tracking complete: tracks={len(stitched)} "
+        f"stitching={perf_counter() - stitching_started_at:.1f}s "
+        f"total={perf_counter() - total_started_at:.1f}s"
+    )
     return _build_tracking_result(frames, stitched)
 
 
@@ -192,6 +211,7 @@ def _build_frame_detections(
     """Convert raw frame labels into detections filtered by confidence."""
     detections_by_frame: list[list[DetectionRecord]] = []
     malformed_count = 0
+    kept_count = 0
     for frame_index, labels in enumerate(frames):
         frame_detections = []
         for detection_index, label in enumerate(labels):
@@ -202,12 +222,10 @@ def _build_frame_detections(
             if detection.confidence < config.confidence_threshold:
                 continue
             frame_detections.append(detection)
+            kept_count += 1
         detections_by_frame.append(frame_detections)
         if frame_index == len(frames) - 1 or (frame_index + 1) % 25 == 0:
-            _log(
-                f"parsed {frame_index + 1}/{len(frames)} frames "
-                f"({sum(len(frame) for frame in detections_by_frame)} detections kept)"
-            )
+            _log(f"phase 1/3 progress: frames={frame_index + 1}/{len(frames)} kept={kept_count}")
     if malformed_count:
         _log(f"skipped {malformed_count} malformed detections while building tracking inputs")
     return detections_by_frame
@@ -253,7 +271,7 @@ def _build_tracklets(
 
         if frame_index == len(detections_by_frame) - 1 or (frame_index + 1) % 25 == 0:
             _log(
-                f"pass 1 progress {frame_index + 1}/{len(detections_by_frame)} frames: "
+                f"phase 2/3 progress: frames={frame_index + 1}/{len(detections_by_frame)} "
                 f"active={len(active)} finished={len(finished)}"
             )
 
@@ -391,20 +409,24 @@ def _stitch_tracklets(tracklets: list[Tracklet], config: TrackingConfig) -> list
         if not merges:
             break
 
-        _log(f"stitching iteration merged {len(merges)} tracklet pairs")
+        _log(f"phase 3/3 progress: merging={len(merges)} pairs tracklets={len(stitched)}")
 
-        for left_idx, right_idx in sorted(merges, reverse=True):
-            left = stitched[left_idx]
-            right = stitched[right_idx]
-            merged = Tracklet(
+        merged_indices = {index for pair in merges for index in pair}
+        merged_tracklets = [
+            Tracklet(
                 detections=sorted(
-                    left.detections + right.detections,
+                    stitched[left_idx].detections + stitched[right_idx].detections,
                     key=lambda det: (det.frame_index, det.detection_index),
                 )
             )
-            del stitched[max(left_idx, right_idx)]
-            del stitched[min(left_idx, right_idx)]
-            stitched.append(merged)
+            for left_idx, right_idx in merges
+        ]
+        stitched = [
+            tracklet for index, tracklet in enumerate(stitched) if index not in merged_indices
+        ]
+        stitched.extend(merged_tracklets)
+        _log(f"phase 3/3 progress: remaining tracklets={len(stitched)}")
+        if merged_tracklets:
             changed = True
     stitched.sort(key=lambda tracklet: (tracklet.start_frame, tracklet.class_id))
     return stitched
