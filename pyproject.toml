@@ -5,6 +5,8 @@ description = "Fish Labeler prepares and annotates fish imagery collected aboard
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "clip",
+    "hf-xet>=1.6.0",
     "numpy>=1.24.0",
     "opencv-python>=4.8.0",
     "pyqt6>=6.6.0",
@@ -65,3 +67,6 @@ sort = "asc"
 exclude = []
 output-csv = false
 output-json = false
+
+[tool.uv.sources]
+clip = { git = "https://github.com/ultralytics/CLIP.git" }
