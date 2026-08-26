@@ -537,11 +537,9 @@ class MainWindow(QMainWindow):
         self.fmt_seg = QCheckBox("YOLO-Seg (Polygon)")
         self.fmt_seg.setChecked(True)
         self.fmt_mask = QCheckBox("PNG Mask")
-        self.fmt_obb = QCheckBox("OBB (Oriented Bounding Box)")
         self.fmt_seg.setToolTip("Save visible annotations as YOLO segmentation polygons.")
         self.fmt_mask.setToolTip("Save visible annotations as a per-pixel indexed mask image.")
-        self.fmt_obb.setToolTip("Save visible annotations as oriented bounding boxes.")
-        for cb in (self.fmt_seg, self.fmt_mask, self.fmt_obb):
+        for cb in (self.fmt_seg, self.fmt_mask):
             cb.stateChanged.connect(self._fmt_changed)
             self.settings_sec.addWidget(cb)
 
@@ -758,7 +756,13 @@ class MainWindow(QMainWindow):
         sl.addWidget(self.tracking_sec)
         sl.addStretch()
 
-        body.addWidget(segmentation_w)
+        segmentation_scroll = QScrollArea()
+        segmentation_scroll.setObjectName("leftPanel")
+        segmentation_scroll.setWidgetResizable(True)
+        segmentation_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        segmentation_scroll.setMinimumWidth(210)
+        segmentation_scroll.setWidget(segmentation_w)
+        body.addWidget(segmentation_scroll)
 
         # -- Canvas --
         self.canvas = AnnotationCanvas()
@@ -1378,10 +1382,11 @@ class MainWindow(QMainWindow):
     # ==================================================================
 
     def _browse_image_folder(self):
-        """Docstring for _browse_image_folder."""
+        """Choose and immediately load an image folder or dataset run directory."""
         d = QFileDialog.getExistingDirectory(self, "Select image folder")
         if d:
             self.folder_input.setText(d)
+            self._load_folder()
 
     def _browse_output_folder(self):
         """Docstring for _browse_output_folder."""
@@ -1389,26 +1394,65 @@ class MainWindow(QMainWindow):
         if d:
             self.output_input.setText(Path(d).name)
 
+    def _has_saved_labels(self, image_path):
+        """Return whether an image has a non-empty current or legacy label file."""
+        for label_folder in ("labels", "labels_seg"):
+            label_path = self.state.output_folder / label_folder / f"{image_path.stem}.txt"
+            if label_path.is_file() and label_path.stat().st_size > 0:
+                return True
+        return False
+
     def _load_folder(self):
-        """Docstring for _load_folder."""
+        """Load a folder, recognizing the standard dataset run layout when present."""
         fp = self.folder_input.text().strip()
         op = self.output_input.text().strip() or "default"
         if not fp:
             self._set_status("Please enter a folder path")
             return
+
+        selected_folder = Path(fp).expanduser()
+        if not selected_folder.is_dir():
+            self._set_status(f"Folder does not exist: {selected_folder}")
+            return
+
+        dataset_folder = selected_folder
+        images_folder = selected_folder
+        if (selected_folder / "images").is_dir():
+            images_folder = selected_folder / "images"
+        elif selected_folder.name == "images":
+            dataset_folder = selected_folder.parent
+
         exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
-        imgs = sorted(p for p in Path(fp).iterdir() if p.suffix.lower() in exts)
+        imgs = sorted(p for p in images_folder.rglob("*") if p.suffix.lower() in exts)
         if not imgs:
             self._set_status("No images found in folder")
             return
+
         self.state.image_list = imgs
-        self.state.output_folder = resolve_output_folder(op)
-        save_config(fp, op)
+        if (dataset_folder / "labels").is_dir() or (dataset_folder / "labels_seg").is_dir():
+            self.state.output_folder = dataset_folder
+            op = dataset_folder.name
+            self.output_input.setText(op)
+        else:
+            self.state.output_folder = resolve_output_folder(op)
+        self.folder_input.setText(str(images_folder))
+        save_config(str(images_folder), op)
         self._load_tracking_state()
         self._refresh_track_list()
-        last = load_progress(fp)
+        last = load_progress(images_folder)
         if last >= len(imgs):
             last = 0
+        if not self._has_saved_labels(imgs[last]):
+            first_annotated_index = next(
+                (
+                    index
+                    for index, image_path in enumerate(imgs)
+                    if self._has_saved_labels(image_path)
+                ),
+                None,
+            )
+            if first_annotated_index is not None:
+                last = first_annotated_index
         self.state.current_index = last
         self._load_current_image()
 
@@ -1886,7 +1930,6 @@ class MainWindow(QMainWindow):
 
     def _fmt_changed(self):
         """Docstring for _fmt_changed."""
-        self.state.output_formats["obb"] = self.fmt_obb.isChecked()
         self.state.output_formats["seg"] = self.fmt_seg.isChecked()
         self.state.output_formats["mask"] = self.fmt_mask.isChecked()
 

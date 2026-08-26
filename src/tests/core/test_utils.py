@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from core.utils import mask_to_binary_image, point_in_obb
+from core.utils import mask_to_binary_image, point_in_quad
 
 
 def test_mask_to_binary_image():
@@ -15,8 +15,8 @@ def test_mask_to_binary_image():
     assert binary[0, 0] == 0
 
 
-def test_point_in_obb():
-    """Test if point is in OBB."""
-    obb = [0.0, 0.0, 0.5, 0.0, 0.5, 0.5, 0.0, 0.5]  # normalized!
-    assert point_in_obb(5, 5, obb, 20, 20)
-    assert not point_in_obb(15, 15, obb, 20, 20)
+def test_point_in_quad():
+    """Test whether a point is in a quadrilateral."""
+    quad = [0.0, 0.0, 0.5, 0.0, 0.5, 0.5, 0.0, 0.5]
+    assert point_in_quad(5, 5, quad, 20, 20)
+    assert not point_in_quad(15, 15, quad, 20, 20)

@@ -37,7 +37,6 @@ class LabelingState:
         self.selected_labels = set()
         # Output formats
         self.output_formats = {
-            "obb": False,
             "seg": True,
             "mask": False,
         }

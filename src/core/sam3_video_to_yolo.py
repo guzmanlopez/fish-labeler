@@ -42,6 +42,15 @@ from core.video_io import VideoHandler, YOLOExporter
 
 LOG = logging.getLogger(__name__)
 CONSOLE = Console()
+DEFAULT_CLASSES = [
+    "fish",
+    "swordfish",
+    "tuna",
+    "shark",
+    "stingray",
+    "sea turtle",
+    "person",
+]
 
 
 def configure_logging(verbose: bool) -> None:
@@ -79,11 +88,8 @@ def str2bool(value: str) -> bool:
     raise argparse.ArgumentTypeError(f"Invalid boolean value: {value}")
 
 
-def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    """Docstring for parse_args."""
-    parser = argparse.ArgumentParser(
-        description="Run SAM3.1 text-prompt segmentation on sampled video frames and export YOLO-seg labels."
-    )
+def add_video_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add video workflow parameters to an argparse parser."""
     parser.add_argument("--video", type=Path, required=True, help="Path to the input video file.")
     parser.add_argument(
         "--output-dir",
@@ -95,15 +101,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--classes",
         nargs="+",
         required=False,
-        default=[
-            "fish",
-            "swordfish",
-            "tuna",
-            "shark",
-            "stingray",
-            "sea turtle",
-            "person",
-        ],
+        default=DEFAULT_CLASSES,
         help="Text prompts to segment. You can pass repeated values or comma-separated values.",
     )
     parser.add_argument(
@@ -123,8 +121,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--frame-step",
         type=int,
-        default=12,
-        help="Process every N frames. For a 12 FPS video, use 12 to process one frame per second.",
+        default=1,
+        help="Process every N frames. Defaults to every frame.",
     )
     parser.add_argument(
         "--sample-every-seconds",
@@ -160,6 +158,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Enable debug logging.",
     )
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse and validate standalone video workflow arguments."""
+    parser = argparse.ArgumentParser(
+        description="Run SAM3.1 text-prompt segmentation on sampled video frames and export YOLO-seg labels."
+    )
+    add_video_arguments(parser)
     args = parser.parse_args(argv)
     args.classes = parse_prompt_classes(args.classes)
     if not args.classes:
@@ -615,6 +621,8 @@ def run(args: argparse.Namespace) -> Path:
     annotations: dict[int, dict] = {}
     total_detections = 0
     frames_with_detections = 0
+    processed_indices: list[int] = []
+    interrupted = False
 
     progress = tqdm(total=len(sampled_indices), desc="Segmenting video frames")
     try:
@@ -633,7 +641,14 @@ def run(args: argparse.Namespace) -> Path:
             total_detections += detection_count
             if detection_count > 0:
                 frames_with_detections += 1
+            processed_indices.append(frame_idx)
             progress.update(1)
+    except KeyboardInterrupt:
+        interrupted = True
+        LOG.warning(
+            "Interrupt received. Saving results for %d completed frame(s)...",
+            len(processed_indices),
+        )
     finally:
         progress.close()
         video_handler.release()
@@ -649,7 +664,7 @@ def run(args: argparse.Namespace) -> Path:
         video_path=args.video.resolve(),
         video_info=video_info,
         frame_step=frame_step,
-        sampled_indices=sampled_indices,
+        sampled_indices=processed_indices,
         sample_every_seconds=args.sample_every_seconds,
         frames_with_detections=frames_with_detections,
         total_detections=total_detections,
@@ -663,12 +678,16 @@ def run(args: argparse.Namespace) -> Path:
         args=args,
         fps=video_info.fps,
         total_frames=video_info.total_frames,
-        sampled_frames=len(sampled_indices),
+        sampled_frames=len(processed_indices),
         frame_step=frame_step,
         total_detections=total_detections,
     )
 
-    empty_label_files = len(sampled_indices) - frames_with_detections
+    empty_label_files = len(processed_indices) - frames_with_detections
+    if interrupted:
+        LOG.warning("Partial video export saved to %s.", output_dir)
+        raise KeyboardInterrupt
+
     LOG.info("Export complete: %s", output_dir)
     LOG.info("Sampled frames: %d", len(sampled_indices))
     LOG.info("Frames with detections: %d", frames_with_detections)
@@ -677,9 +696,8 @@ def run(args: argparse.Namespace) -> Path:
     return output_dir
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Docstring for main."""
-    args = parse_args(argv)
+def run_workflow(args: argparse.Namespace) -> int:
+    """Run parsed video workflow arguments and return a command exit code."""
     configure_logging(args.verbose)
     try:
         run(args)
@@ -690,6 +708,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         LOG.error("Export failed: %s", exc, exc_info=args.verbose)
         return 1
     return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the standalone video workflow command."""
+    return run_workflow(parse_args(argv))
 
 
 if __name__ == "__main__":

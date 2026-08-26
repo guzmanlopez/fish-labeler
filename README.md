@@ -1,6 +1,6 @@
 # Fish Labeler
 
-**Fish Labeler** prepares and annotates fish imagery collected aboard fishing vessels. Use the video workflow to sample frames and create an initial YOLO segmentation dataset, then use the Qt workflow to review and refine annotations.
+**Fish Labeler** prepares and annotates fish imagery collected aboard fishing vessels. Use the video workflow to export frames and create an initial YOLO segmentation dataset, then use the Qt workflow to review and refine annotations.
 
 [English User Manual](docs/USER_MANUAL_en.md)
 
@@ -8,7 +8,7 @@
 
 - **3 Segmentation Methods** — Point click, box selection, and text prompt
 - **AI-Powered** — SAM 3 automatically generates precise segmentation masks
-- **Multi-Format Output** — YOLO OBB, YOLO-Seg, and PNG masks
+- **Multi-Format Output** — YOLO-Seg polygons and PNG masks
 - **Real-Time Rendering** — QPainter vector canvas with millisecond-level interaction
 - **Zoom & Pan** — Scroll wheel zoom, right-click / Space+click / middle-click pan
 - **Hover Highlight** — Dashed outline on hover, cyan highlight on selection
@@ -23,13 +23,13 @@
 
 ### 1. Install Dependencies
 
-**Prerequisites**: Python 3.12+, [uv](https://docs.astral.sh/uv/), and an NVIDIA GPU for practical SAM inference.
+**Prerequisites**: Python 3.14+, [uv](https://docs.astral.sh/uv/), and an NVIDIA GPU for practical SAM inference.
 
 ```bash
 # Install PyTorch first (choose your CUDA version)
 # Visit https://pytorch.org/get-started/locally/ for the correct command
 # Example for CUDA 12.8:
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 
 # Install the locked project dependencies
 uv sync --locked --all-extras --dev
@@ -63,13 +63,16 @@ See the [Ultralytics SAM 3 documentation](https://docs.ultralytics.com/models/sa
 ### 3. Run
 
 ```bash
+# Export every frame from a video and create an initial dataset
+uv run fish-labeler video --video /data/vessel-trip-01.mp4 --output-dir vessel-trip-01
+
+# Launch the Qt application to review and refine annotations
 uv run fish-labeler app
 uv run fish-labeler app --images /data/vessel-trip-01/images --output vessel-trip-01
 uv run fish-labeler app --model /path/to/another-model.pt
-uv run fish-labeler video --video /data/vessel-trip-01.mp4 --output-dir vessel-trip-01
 ```
 
-`fish-labeler video` writes sampled images and initial labels to `output/<run-name>/`. Open those images in the Qt application with `fish-labeler app --images output/<run-name>/images --output <run-name>` to review and refine the dataset. All generated files stay under the repository `output/` directory, even when source media is external or linked.
+`fish-labeler video` exports every source frame and initial labels to `output/<run-name>/` by default. Use `--frame-step N` to export every $N$th frame instead. Open those images in the Qt application with `fish-labeler app --images output/<run-name>/images --output <run-name>` to review and refine the dataset. All generated files stay under the repository `output/` directory, even when source media is external or linked.
 
 ## Three Annotation Modes
 
@@ -81,18 +84,11 @@ uv run fish-labeler video --video /data/vessel-trip-01.mp4 --output-dir vessel-t
 
 ## Output Formats
 
-Fish Labeler supports three output formats simultaneously:
-
-### YOLO OBB (Oriented Bounding Box)
-```
-output/<run-name>/labels/image_name.txt
-# class_id x1 y1 x2 y2 x3 y3 x4 y4 (normalized coordinates)
-0 0.512 0.234 0.612 0.234 0.612 0.456 0.512 0.456
-```
+Fish Labeler supports two output formats simultaneously:
 
 ### YOLO-Seg (Polygon Segmentation)
 ```
-output/<run-name>/labels_seg/image_name.txt
+output/<run-name>/labels/image_name.txt
 # class_id x1 y1 x2 y2 ... xn yn (normalized polygon coordinates)
 0 0.512 0.234 0.534 0.245 0.556 0.267 ...
 ```
@@ -174,10 +170,3 @@ Check the tool is set to Click mode (`1`). Verify cursor is within the image (co
 
 ### SAM inference takes long
 First inference loads the model (10-30s). Subsequent runs take 1-3s. UI remains responsive during inference.
-
-## Acknowledgments
-
-- This project is supported by the **Ocean Conservation Administration, Ocean Affairs Council** (海洋委員會海洋保育署)
-- [Ultralytics](https://github.com/ultralytics/ultralytics) — YOLO and SAM model framework
-- [Meta AI SAM](https://segment-anything.com/) — Segment Anything Model
-- [Qt / PyQt6](https://www.riverbankcomputing.com/software/pyqt/) — Desktop UI framework

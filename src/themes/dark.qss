@@ -7,7 +7,7 @@ QMainWindow { background: #24273A; }
 QWidget { background: transparent; color: #CAD3F5; }
 
 /* Panels */
-QFrame#navBar, QFrame#segmentationPanel, QFrame#rightPanel {
+QFrame#navBar, QFrame#segmentationPanel, QFrame#rightPanel, QScrollArea#leftPanel {
     background: #1E2030;
     border: 1px solid #363A4F;
     border-radius: 6px;

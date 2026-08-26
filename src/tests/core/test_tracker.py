@@ -4,9 +4,9 @@ from core.tracker import TrackingConfig, run_offline_tracker
 
 
 def make_box(class_id, x1, y1, x2, y2, score=0.9):
-    """Create a label tuple using axis-aligned OBB coordinates for tracker tests."""
-    obb = [x1, y1, x2, y1, x2, y2, x1, y2]
-    return (class_id, obb, obb, None, score)
+    """Create a label tuple using axis-aligned quadrilateral coordinates."""
+    quad = [x1, y1, x2, y1, x2, y2, x1, y2]
+    return (class_id, quad, quad, None, score)
 
 
 def test_offline_tracker_stitches_tracklets_across_small_gaps():
@@ -58,7 +58,7 @@ def test_offline_tracker_keeps_distant_objects_separate():
 
 
 def test_offline_tracker_skips_malformed_boxes_without_crashing():
-    """Malformed OBB arrays should be ignored instead of raising index errors."""
+    """Malformed quadrilateral arrays should be ignored instead of raising errors."""
     frames = [
         [(0, [0.1, 0.1, 0.2, 0.1, 0.2, 0.2, 0.1], [0.1, 0.1], None, 0.9)],
         [make_box(0, 0.12, 0.10, 0.22, 0.20)],

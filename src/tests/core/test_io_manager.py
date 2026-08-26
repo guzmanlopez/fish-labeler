@@ -6,6 +6,7 @@ from core import io_manager
 from core.io_manager import (
     auto_save_labels,
     load_config,
+    load_existing_labels,
     load_persisted_classes,
     load_tracking_data,
     persist_classes,
@@ -87,7 +88,24 @@ def test_auto_save_labels_only_writes_annotations_visible_in_filters(tmp_path):
     ]
 
     message = auto_save_labels(state)
-    saved_lines = (state.output_folder / "labels_seg" / "frame_0001.txt").read_text().splitlines()
+    saved_lines = (state.output_folder / "labels" / "frame_0001.txt").read_text().splitlines()
 
     assert message == "Saved 1 annotations (Seg)"
     assert len(saved_lines) == 1
+
+
+def test_load_existing_labels_reads_video_workflow_polygons_from_labels_directory(tmp_path):
+    """Video workflow polygons stored in labels/ should appear in the Qt application."""
+    label_path = tmp_path / "labels" / "frame_000000.txt"
+    label_path.parent.mkdir()
+    label_path.write_text("1 0.1 0.1 0.9 0.1 0.9 0.9 0.1 0.9\n", encoding="utf-8")
+
+    labels = load_existing_labels(
+        label_path,
+        tmp_path / "labels_seg" / "frame_000000.txt",
+        np.zeros((100, 100, 3), dtype=np.uint8),
+    )
+
+    assert len(labels) == 1
+    assert labels[0][0] == 1
+    assert labels[0][2] == [0.1, 0.1, 0.9, 0.1, 0.9, 0.9, 0.1, 0.9]

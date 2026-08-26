@@ -129,7 +129,7 @@ def label_to_detection(
     if len(coords) < 8 or len(coords) % 2 != 0:
         _log(
             "skipping malformed detection "
-            f"at frame={frame_index} index={detection_index}: expected 8 OBB values, got {len(coords)}"
+            f"at frame={frame_index} index={detection_index}: expected 8 quadrilateral values, got {len(coords)}"
         )
         return None
 

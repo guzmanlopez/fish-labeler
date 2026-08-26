@@ -8,7 +8,7 @@ Fish Labeler is intended for annotating fish, catch, crew, and vessel context in
 
 - Annotate objects using three methods: click, box-select, or text prompt
 - Auto-detect object boundaries via Meta SAM 3
-- Export in OBB / YOLO-Seg / PNG Mask formats
+- Export in YOLO-Seg / PNG Mask formats
 - Zoom with scroll wheel, pan with right-click drag — ideal for high-res images
 
 ---
@@ -32,7 +32,7 @@ Fish Labeler is intended for annotating fish, catch, crew, and vessel context in
 
 ```bash
 # 1. Install PyTorch (choose your CUDA version)
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 
 # 2. Install locked dependencies
 uv sync --locked --all-extras --dev
@@ -72,7 +72,7 @@ uv run fish-labeler app --model /path/to/sam3.pt
 │        │                                      │  Overlap  ──●─ 10%      │
 │        │                                      │                          │
 │        │                                      │  Output Formats          │
-│        │                                      │  ☑OBB ☑Seg ☐Mask      │
+│        │                                      │  ☑Seg ☐Mask           │
 │        │                                      │                          │
 │        │                                      │  Annotation List         │
 │        │                                      │  ■ 1. tuna              │
@@ -146,8 +146,7 @@ Enter object names (comma-separated), press Enter. SAM 3 finds all matching obje
 
 | Format | Default | Description |
 |--------|---------|-------------|
-| OBB | ☑ | `labels/*.txt` — YOLO OBB training |
-| YOLO-Seg | ☑ | `labels_seg/*.txt` — instance segmentation |
+| YOLO-Seg | ☑ | `labels/*.txt` — instance segmentation |
 | PNG Mask | ☐ | `masks/*.png` — semantic segmentation |
 
 #### Annotation List
@@ -225,8 +224,7 @@ Switching images (← → keys, buttons, jump) triggers auto-save.
 ```
 output/<run-name>/
 ├── images/              ← Annotated image copies
-├── labels/              ← OBB format (class x1 y1 x2 y2 x3 y3 x4 y4)
-├── labels_seg/          ← YOLO-Seg polygon format
+├── labels/              ← YOLO-Seg polygon format
 ├── masks/               ← PNG masks (if enabled)
 └── classes.txt          ← Class list
 ```
@@ -279,7 +277,6 @@ If you switched images at least once, previous annotations are saved. Reload the
 
 | Term | Definition |
 |------|------------|
-| **OBB** | Oriented Bounding Box — rotated rectangle with 4 vertices |
 | **Seg** | Segmentation — polygon vertices defining precise boundary |
 | **Mask** | Binary image (0=background, 255=object) |
 | **SAM** | Segment Anything Model by Meta |

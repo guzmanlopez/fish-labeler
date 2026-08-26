@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import numpy as np
-from PyQt6.QtWidgets import QAbstractItemView, QPushButton
+from PyQt6.QtWidgets import QAbstractItemView, QPushButton, QScrollArea
 
 from ui.canvas import LABEL_COLORS, has_canvas_label_icon
 from ui.main_window import ANNOTATION_COLOR_ROLE, MainWindow, has_annotation_icon
@@ -23,7 +23,7 @@ def build_window(monkeypatch, qtbot):
         "ui.main_window.load_persisted_classes",
         lambda: ["person", "fish", "buoy"],
     )
-    monkeypatch.setattr("ui.main_window.load_config", lambda: {})
+    monkeypatch.setattr("ui.main_window.load_config", dict)
 
     window = MainWindow()
     qtbot.addWidget(window)
@@ -94,6 +94,16 @@ def test_tracking_section_contains_controls(monkeypatch, qtbot):
     assert window.stitch_gap_slider.value() == 12
     assert window.track_id_input.placeholderText() == "Track ID"
     assert find_button(window, "Merge").toolTip()
+
+
+def test_tracking_controls_are_in_a_scrollable_left_panel(monkeypatch, qtbot):
+    """The left panel should scroll rather than compress Tracklet Linking controls."""
+    window = build_window(monkeypatch, qtbot)
+
+    left_panel = window.findChild(QScrollArea, "leftPanel")
+
+    assert left_panel is not None
+    assert left_panel.widget().isAncestorOf(window.track_linking_sec)
 
 
 def test_buttons_and_tracking_controls_expose_tooltips(monkeypatch, qtbot):
@@ -264,6 +274,60 @@ def test_load_current_image_replots_kept_point_prompts(monkeypatch, qtbot):
     assert window.canvas._positive_prompt_points == [(10, 20)]
     assert window.canvas._negative_prompt_points == [(30, 15)]
     assert window.point_prompt_counts_label.text() == "Positive: 1 | Negative: 1"
+
+
+def test_load_folder_recognizes_dataset_run_and_loads_annotations(monkeypatch, qtbot, tmp_path):
+    """Selecting a run should find nested images and labels beside its images folder."""
+    window = build_window(monkeypatch, qtbot)
+    run_folder = tmp_path / "sample-run"
+    image_folder = run_folder / "images" / "camera-a"
+    image_folder.mkdir(parents=True)
+    (run_folder / "labels_seg").mkdir()
+    image_path = image_folder / "frame_0001.jpg"
+    image_path.touch()
+    (run_folder / "labels_seg" / "frame_0001.txt").write_text(
+        "1 0.1 0.1 0.9 0.1 0.9 0.9 0.1 0.9\n", encoding="utf-8"
+    )
+    image = np.zeros((32, 48, 3), dtype=np.uint8)
+    monkeypatch.setattr("ui.main_window.cv2.imread", lambda path: image.copy())
+    monkeypatch.setattr("ui.main_window.load_progress", lambda folder: 0)
+    monkeypatch.setattr("ui.main_window.save_config", lambda *args: None)
+
+    window.folder_input.setText(str(run_folder))
+    window._load_folder()
+
+    assert window.folder_input.text() == str(run_folder / "images")
+    assert window.output_input.text() == "sample-run"
+    assert window.state.output_folder == run_folder
+    assert window.state.image_list == [image_path]
+    assert len(window.state.current_labels) == 1
+
+
+def test_load_folder_skips_unannotated_saved_progress(monkeypatch, qtbot, tmp_path):
+    """Saved progress should not hide later video-workflow detections on startup."""
+    window = build_window(monkeypatch, qtbot)
+    run_folder = tmp_path / "sample-run"
+    image_folder = run_folder / "images"
+    labels_folder = run_folder / "labels"
+    image_folder.mkdir(parents=True)
+    labels_folder.mkdir()
+    unannotated_image = image_folder / "frame_000000.jpg"
+    annotated_image = image_folder / "frame_000012.jpg"
+    unannotated_image.touch()
+    annotated_image.touch()
+    (labels_folder / "frame_000012.txt").write_text(
+        "1 0.1 0.1 0.9 0.1 0.9 0.9 0.1 0.9\n", encoding="utf-8"
+    )
+    image = np.zeros((32, 48, 3), dtype=np.uint8)
+    monkeypatch.setattr("ui.main_window.cv2.imread", lambda path: image.copy())
+    monkeypatch.setattr("ui.main_window.load_progress", lambda folder: 0)
+    monkeypatch.setattr("ui.main_window.save_config", lambda *args: None)
+
+    window.folder_input.setText(str(image_folder))
+    window._load_folder()
+
+    assert window.state.current_image_path == annotated_image
+    assert len(window.state.current_labels) == 1
 
 
 def test_successful_point_inference_keeps_prompt_markers_visible(monkeypatch, qtbot):
