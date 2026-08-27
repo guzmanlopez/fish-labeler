@@ -7,7 +7,7 @@
 ## Features
 
 - **3 Segmentation Methods** — Point click, box selection, and text prompt
-- **AI-Powered** — SAM 3 automatically generates precise segmentation masks
+- **AI-Powered** — SAM3 automatically generates precise segmentation masks
 - **Multi-Format Output** — YOLO-Seg polygons and PNG masks
 - **Real-Time Rendering** — QPainter vector canvas with millisecond-level interaction
 - **Zoom & Pan** — Scroll wheel zoom, right-click / Space+click / middle-click pan
@@ -35,11 +35,11 @@ uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu
 uv sync --locked --all-extras --dev
 ```
 
-### 2. Download SAM 3 From Hugging Face
+### 2. Download SAM3 From Hugging Face
 
-The SAM 3 weights (`sam3.pt`, about 3.4 GB) are not included in this repository. Meta gates the [facebook/sam3 model repository](https://huggingface.co/facebook/sam3), so the Hugging Face account used to download the file must be approved first.
+The SAM3 weights (`sam3.pt`, about 3.4 GB) are not included in this repository. Meta gates the [facebook/sam3 model repository](https://huggingface.co/facebook/sam3), so the Hugging Face account used to download the file must be approved first.
 
-1. Sign in to Hugging Face and open the [SAM 3 model page](https://huggingface.co/facebook/sam3).
+1. Sign in to Hugging Face and open the [SAM3 model page](https://huggingface.co/facebook/sam3).
 2. Select **Request access**, accept the model terms, and wait for Meta approval.
 3. After approval, download `sam3.pt` from the repository's **Files and versions** tab.
 4. Place the downloaded file at `src/models/sam3.pt`.
@@ -55,10 +55,10 @@ hf download facebook/sam3 sam3.pt --local-dir src/models
 Verify the file before starting a workflow:
 
 ```bash
-test -f src/models/sam3.pt && echo "SAM 3 model ready"
+test -f src/models/sam3.pt && echo "SAM3 model ready"
 ```
 
-See the [Ultralytics SAM 3 documentation](https://docs.ultralytics.com/models/sam-3/) for model details and hardware guidance.
+See the [Ultralytics SAM3 documentation](https://docs.ultralytics.com/models/sam-3/) for model details and hardware guidance.
 
 ### 3. Run
 
@@ -129,8 +129,8 @@ fish-labeler/
     ├── config/          # Local classes, progress, and UI settings
     ├── models/           # SAM model weights
     ├── segmentation/
-    │   ├── sam_engine.py        # SAM 3 model wrapper
-    │   └── sam3_video_to_yolo.py # SAM 3 video export workflow
+    │   ├── sam_engine.py        # SAM3 model wrapper
+    │   └── sam3_video_to_yolo.py # SAM3 video export workflow
     ├── tracker/
     │   └── offline_tracker.py   # Offline multi-object tracker
     ├── core/

@@ -351,7 +351,7 @@ class MainWindow(QMainWindow):
         self.sam3_sec = CollapsibleSection("SAM3 Segmentation", expanded=True)
 
         # -- Text segmentation --
-        self.text_seg_sec = CollapsibleSection("Text prompt:")
+        self.text_seg_sec = CollapsibleSection("Text prompt", expanded=False)
         self.text_prompt = QLineEdit(self.state.classes[0] if self.state.classes else "")
         self.text_prompt.setPlaceholderText("e.g.: person,fish,glove,buoy,blood,stick")
         self.text_prompt.setToolTip(
@@ -369,7 +369,7 @@ class MainWindow(QMainWindow):
         self.sam3_sec.addWidget(self.text_seg_sec)
 
         # -- Visual segmentation modes --
-        self.visual_seg_sec = CollapsibleSection("Visual prompt")
+        self.visual_seg_sec = CollapsibleSection("Visual prompt", expanded=False)
         self.mode_group = QButtonGroup(self)
         self.mode_group.addButton(self.selection_btn, 2)
         self.mode_group.addButton(self.remove_from_bbox_btn, 3)
@@ -410,7 +410,7 @@ class MainWindow(QMainWindow):
         class_sel_box.addWidget(del_cls_btn)
         self.visual_seg_sec.addLayout(class_sel_box)
 
-        self.point_prompt_sec = CollapsibleSection("Point prompts", expanded=True)
+        self.point_prompt_sec = CollapsibleSection("Point prompts", expanded=False)
         point_prompt_hint = QLabel("Click the canvas to queue points, then run SAM.")
         point_prompt_hint.setStyleSheet("color: #8B949E; font-size: 11px;")
         self.point_prompt_sec.addWidget(point_prompt_hint)
@@ -570,7 +570,7 @@ class MainWindow(QMainWindow):
         self.sam3_sec.addWidget(self.settings_sec)
         sl.addWidget(self.sam3_sec)
 
-        self.tracking_sec = CollapsibleSection("Tracking", expanded=False)
+        self.tracking_sec = CollapsibleSection("Tracking", expanded=True)
         run_tracking_btn = QPushButton("Run tracking")
         run_tracking_btn.setObjectName("primaryBtn")
         run_tracking_btn.setToolTip(
@@ -579,7 +579,7 @@ class MainWindow(QMainWindow):
         run_tracking_btn.clicked.connect(self._run_tracking)
         self.tracking_sec.addWidget(run_tracking_btn)
 
-        self.track_linking_sec = CollapsibleSection("Tracklet Linking", expanded=True)
+        self.track_linking_sec = CollapsibleSection("Tracklet Linking", expanded=False)
 
         self.track_conf_slider, self.track_conf_label = self._add_tracking_slider_control(
             self.track_linking_sec,
@@ -725,7 +725,7 @@ class MainWindow(QMainWindow):
 
         self.track_manager_sec = CollapsibleSection("Track Manager", expanded=True)
 
-        self.track_manager_sec.addWidget(QLabel("Tracks:"))
+        self.track_manager_sec.addWidget(QLabel("Tracks"))
         self.track_list = QListWidget()
         self.track_list.setObjectName("trackList")
         self.track_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -739,6 +739,7 @@ class MainWindow(QMainWindow):
         )
         self.track_list.setItemDelegate(AnnotationItemDelegate(self.track_list))
         self.track_list.itemSelectionChanged.connect(self._on_track_list_selection)
+        self.track_list.itemDoubleClicked.connect(self._on_track_double_clicked)
         self.track_manager_sec.addWidget(self.track_list)
 
         track_assign_row = QHBoxLayout()
@@ -1314,17 +1315,36 @@ class MainWindow(QMainWindow):
                 f"Selected {len(self.state.selected_track_ids)} tracks for compare or merge"
             )
 
+    def _on_track_double_clicked(self, item):
+        """Navigate to the first frame containing the double-clicked track."""
+        track_id = item.data(TRACK_ITEM_ROLE)
+        summary = self.state.track_summaries.get(track_id)
+        if summary is None or not self.state.image_list:
+            return
+        start_frame = summary.get("start_frame")
+        if not isinstance(start_frame, int) or not 0 <= start_frame < len(self.state.image_list):
+            return
+        self.state.output_folder = resolve_output_folder(self.output_input.text())
+        self._sync_current_frame_track_ids()
+        auto_save_labels(self.state)
+        self._save_tracking_state()
+        self.state.current_index = start_frame
+        save_progress(self.state.image_list[0].parent, start_frame, self.state.image_list)
+        self._load_current_image()
+
     def _apply_track_to_selection(self):
         """Assign the typed or next track id to selected annotations in the current frame."""
         if not self.state.selected_labels:
             self._set_status("Select annotations before assigning a track")
             return
         track_id = self._selected_or_typed_track_id() or self._next_track_id()
+        track_class_id = self._track_class_id(track_id)
         for row in self.state.selected_labels:
             if row < len(self.state.current_labels):
-                self.state.current_labels[row] = set_label_track_id(
-                    self.state.current_labels[row], track_id
-                )
+                label = self.state.current_labels[row]
+                if track_class_id is not None and get_label_track_id(label) is None:
+                    label = (track_class_id,) + label[1:]
+                self.state.current_labels[row] = set_label_track_id(label, track_id)
         self.state.selected_track_ids = {track_id}
         self._sync_current_frame_track_ids()
         self._rebuild_track_summaries()
@@ -1332,6 +1352,14 @@ class MainWindow(QMainWindow):
         self._refresh_labels_ui()
         self._refresh_track_list()
         self._set_status(f"Assigned T{track_id} to {len(self.state.selected_labels)} annotations")
+
+    def _track_class_id(self, track_id):
+        """Return the existing class for a track, or None for a new track."""
+        summary = self.state.track_summaries.get(track_id)
+        if summary is None:
+            return None
+        class_id = summary.get("class_id")
+        return class_id if isinstance(class_id, int) else None
 
     def _delete_selected_track(self):
         """Remove a track id from all frames without deleting the underlying detections."""

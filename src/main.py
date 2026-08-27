@@ -69,7 +69,7 @@ def main(argv: list[str] | None = None) -> int:
     workflows = parser.add_subparsers(dest="workflow", required=True)
 
     app_parser = workflows.add_parser("app", help="Launch the Qt annotation application")
-    app_parser.add_argument("--model", default=str(DEFAULT_MODEL_PATH), help="SAM 3 model path")
+    app_parser.add_argument("--model", default=str(DEFAULT_MODEL_PATH), help="SAM3 model path")
     app_parser.add_argument("--images", help="Image folder path")
     app_parser.add_argument("--output", help="Run name below the repository output directory")
 
@@ -83,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.workflow == "sam3video":
         CONSOLE.print(
             Panel(
-                "Preparing a SAM 3 dataset below output/<run-name>.",
+                "Preparing a SAM3 dataset below output/<run-name>.",
                 title="Fish Labeler",
                 border_style="cyan",
             )

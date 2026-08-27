@@ -1,5 +1,5 @@
 """
-SAM 3 model loading and inference
+SAM3 model loading and inference
 Preserves original load_sam3_model / load_sam_model logic
 """
 
@@ -25,7 +25,7 @@ DEFAULT_MODEL_PATH = Path(__file__).resolve().parents[1] / "models" / "sam3.pt"
 class SAMEngine:
     """SAMEngine class."""
 
-    """Wrapper for SAM 3 model operations"""
+    """Wrapper for SAM3 model operations"""
 
     def __init__(self, model_path=DEFAULT_MODEL_PATH, device="cuda:0"):
         """Docstring for __init__."""
@@ -48,7 +48,7 @@ class SAMEngine:
                     "verbose": False,
                 },
             )
-            logger.info(f"[OK] SAM 3 semantic model loaded ({self.device})")
+            logger.info(f"[OK] SAM3 semantic model loaded ({self.device})")
         return self._predictor
 
     def _ensure_sam(self):

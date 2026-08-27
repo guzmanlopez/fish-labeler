@@ -60,10 +60,10 @@ def test_mainwindow_starts_with_secondary_sections_collapsed(monkeypatch, qtbot)
     window = build_window(monkeypatch, qtbot)
 
     assert not window.sam3_sec.content_area.isHidden()
-    assert not window.tracking_sec.toggle_btn.isChecked()
-    assert window.tracking_sec.content_area.isHidden()
-    assert window.track_linking_sec.toggle_btn.isChecked()
-    assert not window.track_linking_sec.content_area.isHidden()
+    assert window.tracking_sec.toggle_btn.isChecked()
+    assert not window.tracking_sec.content_area.isHidden()
+    assert not window.track_linking_sec.toggle_btn.isChecked()
+    assert window.track_linking_sec.content_area.isHidden()
     assert not window.track_stitching_sec.toggle_btn.isChecked()
     assert window.track_stitching_sec.content_area.isHidden()
     assert window.track_manager_sec.toggle_btn.isChecked()
@@ -79,7 +79,7 @@ def test_expanded_sections_use_higher_contrast_header_text(monkeypatch, qtbot):
     window = build_window(monkeypatch, qtbot)
 
     assert "#F5F7FF" in window.sam3_sec.toggle_btn.styleSheet()
-    assert "#8B949E" in window.tracking_sec.toggle_btn.styleSheet()
+    assert "#F5F7FF" in window.tracking_sec.toggle_btn.styleSheet()
 
 
 def test_tracking_section_contains_controls(monkeypatch, qtbot):
@@ -479,6 +479,38 @@ def test_refresh_track_list_uses_class_colors(monkeypatch, qtbot):
     assert window.track_list.item(0).data(ANNOTATION_COLOR_ROLE) == LABEL_COLORS[1]
 
 
+def test_double_clicking_track_navigates_to_first_track_frame(monkeypatch, qtbot):
+    """Double-clicking a track should load its zero-based first frame index."""
+    window = build_window(monkeypatch, qtbot)
+    window.state.image_list = [Path("frame_0001.jpg"), Path("frame_0002.jpg")]
+    window.state.current_index = 0
+    window.state.current_image_path = window.state.image_list[0]
+    window.state.track_summaries = {
+        7: {"track_id": 7, "start_frame": 1, "end_frame": 1},
+    }
+    window._refresh_track_list()
+    saved_progress = []
+    monkeypatch.setattr("ui.main_window.auto_save_labels", lambda state: None)
+    monkeypatch.setattr(window, "_sync_current_frame_track_ids", lambda: None)
+    monkeypatch.setattr(window, "_save_tracking_state", lambda: None)
+    monkeypatch.setattr(
+        "ui.main_window.save_progress",
+        lambda folder, index, image_list: saved_progress.append((folder, index, image_list)),
+    )
+    loaded_indices = []
+    monkeypatch.setattr(
+        window,
+        "_load_current_image",
+        lambda: loaded_indices.append(window.state.current_index),
+    )
+
+    window._on_track_double_clicked(window.track_list.item(0))
+
+    assert window.state.current_index == 1
+    assert loaded_indices == [1]
+    assert saved_progress == [(Path("."), 1, window.state.image_list)]
+
+
 def test_merge_selected_tracks_rewrites_ids_and_summaries(monkeypatch, qtbot):
     """Merging selected tracks should keep the lowest id and remap all selected tracks to it."""
     window = build_window(monkeypatch, qtbot)
@@ -558,3 +590,79 @@ def test_change_selected_class_updates_the_selected_track_across_frames(monkeypa
     assert window.state.current_labels[1] == current_labels[1]
     assert saved_labels[other_path][0][0] == 0
     assert saved_labels[other_path][1] == other_labels[1]
+
+
+def test_assigning_untracked_annotation_to_existing_track_uses_track_class(monkeypatch, qtbot):
+    """Joining an existing track should copy its class onto an untracked annotation."""
+    window = build_window(monkeypatch, qtbot)
+    window.state.current_labels = [(0, [], [], None, 0.8), (1, [], [], None, 0.9, 7)]
+    window.state.selected_labels = {0}
+    window.state.track_summaries = {7: {"track_id": 7, "class_id": 1}}
+    window.track_id_input.setText("7")
+    monkeypatch.setattr(window, "_save_tracking_state", lambda: None)
+    monkeypatch.setattr(window, "_rebuild_track_summaries", lambda: None)
+
+    window._apply_track_to_selection()
+
+    assert window.state.current_labels[0][0] == 1
+    assert window.state.current_labels[0][5] == 7
+    assert window.state.current_labels[1][0] == 1
+    assert window.state.current_labels[1][5] == 7
+
+
+def test_track_panel_selection_and_removal_clear_track_assignments(monkeypatch, qtbot):
+    """Selecting a track row should select its labels, and deleting it should clear its IDs."""
+    window = build_window(monkeypatch, qtbot)
+    window.state.current_image_path = Path("frame_0001.jpg")
+    window.state.current_labels = [
+        (1, [], [], None, 0.9, 7),
+        (0, [], [], None, 0.8, 3),
+    ]
+    window.state.frame_track_ids = {"frame_0001.jpg": [7, 3], "frame_0002.jpg": [7, None]}
+    window.state.track_summaries = {
+        3: {"track_id": 3, "class_id": 0, "start_frame": 0, "end_frame": 0},
+        7: {"track_id": 7, "class_id": 1, "start_frame": 0, "end_frame": 1},
+    }
+    window._refresh_labels_ui()
+    window.track_list.item(1).setSelected(True)
+    window._on_track_list_selection()
+
+    assert window.state.selected_track_ids == {7}
+    assert window.state.selected_labels == {0}
+
+    window.track_id_input.clear()
+    monkeypatch.setattr(window, "_save_tracking_state", lambda: None)
+    window._delete_selected_track()
+
+    assert window.state.frame_track_ids == {"frame_0001.jpg": [None, 3]}
+    assert window.state.current_labels[0][5] is None
+    assert window.state.current_labels[1][5] == 3
+    assert 7 not in window.state.track_summaries
+
+
+def test_changing_track_class_refreshes_annotation_and_track_colors(monkeypatch, qtbot):
+    """Changing a track class should update its rendered class IDs and row color."""
+    window = build_window(monkeypatch, qtbot)
+    window.state.current_image = np.zeros((20, 20, 3), dtype=np.uint8)
+    window.state.current_image_path = Path("frame_0001.jpg")
+    window.state.current_labels = [(1, [], [], None, 0.9, 7)]
+    window.state.image_list = [window.state.current_image_path]
+    window.state.frame_track_ids = {"frame_0001.jpg": [7]}
+    window.state.track_summaries = {
+        7: {"track_id": 7, "class_id": 1, "start_frame": 0, "end_frame": 0}
+    }
+    window.state.selected_labels = {0}
+    window.change_combo.setCurrentText("person")
+    monkeypatch.setattr("ui.main_window.auto_save_labels", lambda state: None)
+    monkeypatch.setattr(window, "_save_tracking_state", lambda: None)
+
+    def rebuild_track_summaries():
+        window.state.track_summaries[7]["class_id"] = 0
+
+    monkeypatch.setattr(window, "_rebuild_track_summaries", rebuild_track_summaries)
+
+    window._change_selected_class()
+
+    assert window.state.current_labels[0][0] == 0
+    assert window.canvas._labels[0][0] == 0
+    assert window.track_list.item(0).data(ANNOTATION_COLOR_ROLE).name() == LABEL_COLORS[0].name()

@@ -1,6 +1,6 @@
 # Fish Labeler User Guide
 
-Fish Labeler turns a fishing-vessel video into sampled image frames, initial SAM 3 segmentation labels, and a reviewable YOLO segmentation dataset. The normal workflow is:
+Fish Labeler turns a fishing-vessel video into sampled image frames, initial SAM3 segmentation labels, and a reviewable YOLO segmentation dataset. The normal workflow is:
 
 1. Process a video into a named run.
 2. Open that run in the Qt application.
@@ -11,7 +11,7 @@ Each run lives below `output/<run-name>/`, so the source video can live anywhere
 
 ## Before You Start
 
-Install the project dependencies and put the approved SAM 3 weights at `src/models/sam3.pt`. The model is available from [facebook/sam3 on Hugging Face](https://huggingface.co/facebook/sam3).
+Install the project dependencies and put the approved SAM3 weights at `src/models/sam3.pt`. The model is available from [facebook/sam3 on Hugging Face](https://huggingface.co/facebook/sam3).
 
 ```bash
 uv sync --locked --all-extras --dev
