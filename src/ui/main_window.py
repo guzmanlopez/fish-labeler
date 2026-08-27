@@ -49,7 +49,7 @@ from core.io_manager import (
     save_tracking_data,
 )
 from core.state import LabelingState
-from core.utils import remove_labels_in_box
+from core.utils import merge_segmentation_labels, remove_labels_in_box
 from segmentation.sam_engine import DEFAULT_MODEL_PATH, SAMEngine
 from tracker.offline_tracker import TrackingConfig, run_offline_tracker
 from ui.canvas import LABEL_COLORS, AnnotationCanvas, get_class_icon, icon_asset_exists
@@ -369,7 +369,7 @@ class MainWindow(QMainWindow):
         self.sam3_sec.addWidget(self.text_seg_sec)
 
         # -- Visual segmentation modes --
-        self.visual_seg_sec = CollapsibleSection("Visual prompt:")
+        self.visual_seg_sec = CollapsibleSection("Visual prompt")
         self.mode_group = QButtonGroup(self)
         self.mode_group.addButton(self.selection_btn, 2)
         self.mode_group.addButton(self.remove_from_bbox_btn, 3)
@@ -887,6 +887,11 @@ class MainWindow(QMainWindow):
         chg_btn.clicked.connect(self._change_selected_class)
         op1.addWidget(chg_btn)
         self.anno_sec.addLayout(op1)
+
+        merge_btn = QPushButton("Merge")
+        merge_btn.setToolTip("Merge the selected annotation polygons into one annotation.")
+        merge_btn.clicked.connect(self._merge_selected_annotations)
+        self.anno_sec.addWidget(merge_btn)
 
         op2 = QHBoxLayout()
         op2.setSpacing(4)
@@ -2045,6 +2050,38 @@ class MainWindow(QMainWindow):
     # Annotation operations
     # ==================================================================
 
+    def _merge_selected_annotations(self):
+        """Replace selected segmentation labels with their polygon union."""
+        selected_indices = sorted(self.state.selected_labels)
+        if len(selected_indices) < 2 or self.state.current_image is None:
+            self._set_status("Select at least two annotations to merge")
+            return
+
+        selected_labels = [self.state.current_labels[index] for index in selected_indices]
+        image_height, image_width = self.state.current_image.shape[:2]
+        merged_label = merge_segmentation_labels(
+            selected_labels,
+            image_width,
+            image_height,
+            self.state.polygon_epsilon,
+        )
+        if merged_label is None:
+            self._set_status("Selected annotations have no mergeable polygons")
+            return
+
+        first_index = selected_indices[0]
+        self.state.current_labels = [
+            merged_label if index == first_index else label
+            for index, label in enumerate(self.state.current_labels)
+            if index not in selected_indices or index == first_index
+        ]
+        self.state.selected_labels = {first_index}
+        self._sync_current_frame_track_ids()
+        self._rebuild_track_summaries()
+        self._save_tracking_state()
+        self._refresh_labels_ui()
+        self._set_status(f"Merged {len(selected_indices)} annotations")
+
     def _delete_selected(self):
         """Docstring for _delete_selected."""
         if not self.state.selected_labels:
@@ -2087,6 +2124,15 @@ class MainWindow(QMainWindow):
         if not nc or nc not in self.state.classes:
             return
         nid = self.state.classes.index(nc)
+        selected_track_ids = {
+            get_label_track_id(self.state.current_labels[index])
+            for index in self.state.selected_labels
+            if index < len(self.state.current_labels)
+        }
+        if len(selected_track_ids) == 1 and None not in selected_track_ids:
+            self._change_track_class(next(iter(selected_track_ids)), nid)
+            self._set_status(f"Changed track to {nc}")
+            return
         for i in self.state.selected_labels:
             if i < len(self.state.current_labels):
                 lb = self.state.current_labels[i]
@@ -2096,6 +2142,42 @@ class MainWindow(QMainWindow):
         self._save_tracking_state()
         self._refresh_labels_ui()
         self._set_status(f"Changed to {nc}")
+
+    def _change_track_class(self, track_id, class_id):
+        """Change the class for every detection with a track id in the sequence."""
+        current_path = self.state.current_image_path
+        image_paths = self.state.image_list or ([current_path] if current_path is not None else [])
+        for image_path in image_paths:
+            if image_path == current_path:
+                image = self.state.current_image
+                labels = self.state.current_labels
+            else:
+                image_bgr = cv2.imread(str(image_path))
+                if image_bgr is None:
+                    continue
+                image = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+                labels = self._load_track_aware_labels_for_frame(image_path)
+            updated_labels = [
+                ((class_id,) + label[1:]) if get_label_track_id(label) == track_id else label
+                for label in labels
+            ]
+            if updated_labels == labels:
+                continue
+            if image_path == current_path:
+                self.state.current_labels = updated_labels
+            frame_state = SimpleNamespace(
+                current_image=image,
+                current_image_path=image_path,
+                current_labels=updated_labels,
+                output_folder=self.state.output_folder,
+                classes=self.state.classes,
+                class_thresholds=self.state.class_thresholds,
+                output_formats=self.state.output_formats,
+            )
+            auto_save_labels(frame_state)
+        self._rebuild_track_summaries()
+        self._save_tracking_state()
+        self._refresh_labels_ui()
 
     def _add_class(self):
         """Docstring for _add_class."""

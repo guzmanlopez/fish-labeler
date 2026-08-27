@@ -323,6 +323,29 @@ def test_remove_from_bbox_removes_intersecting_labels_from_every_frame(monkeypat
     assert window.status_label.text() == "Removed 2 annotations across all frames"
 
 
+def test_merge_selected_annotations_replaces_noncontiguous_labels(monkeypatch, qtbot):
+    """Annotation merging should keep the merged row at the first selected position."""
+    window = build_window(monkeypatch, qtbot)
+    image = np.zeros((100, 100, 3), dtype=np.uint8)
+    labels = [
+        (1, [], [], np.pad(np.ones((20, 20), dtype=np.uint8), ((10, 70), (10, 70))), 0.72),
+        (0, [], [], np.pad(np.ones((20, 20), dtype=np.uint8), ((40, 40), (40, 40))), 0.80),
+        (1, [], [], np.pad(np.ones((20, 20), dtype=np.uint8), ((70, 10), (70, 10))), 0.91),
+    ]
+    window.state.current_image = image
+    window.state.current_labels = labels
+    window.state.selected_labels = {0, 2}
+    monkeypatch.setattr(window, "_save_tracking_state", lambda: None)
+
+    window._merge_selected_annotations()
+
+    assert len(window.state.current_labels) == 2
+    assert window.state.current_labels[0][0] == 1
+    assert window.state.current_labels[1] == labels[1]
+    assert window.state.selected_labels == {0}
+    assert window.status_label.text() == "Merged 2 annotations"
+
+
 def test_load_current_image_replots_kept_point_prompts(monkeypatch, qtbot):
     """Loading another frame should re-apply kept point prompts onto the canvas."""
     window = build_window(monkeypatch, qtbot)
@@ -500,3 +523,38 @@ def test_merge_selected_tracks_rewrites_ids_and_summaries(monkeypatch, qtbot):
     assert window.state.frame_track_ids["frame_0002.jpg"] == [2, None, 2]
     assert all(label[5] == 2 for label in window.state.current_labels)
     assert set(window.state.track_summaries) == {2}
+
+
+def test_change_selected_class_updates_the_selected_track_across_frames(monkeypatch, qtbot):
+    """Changing a tracked annotation class should update that track in every frame."""
+    window = build_window(monkeypatch, qtbot)
+    current_path = Path("frame_0001.jpg")
+    other_path = Path("frame_0002.jpg")
+    current_labels = [(1, [], [], None, 0.9, 7), (0, [], [], None, 0.8, 3)]
+    other_labels = [(1, [], [], None, 0.85, 7), (0, [], [], None, 0.75, 3)]
+    window.state.image_list = [current_path, other_path]
+    window.state.current_image_path = current_path
+    window.state.current_image = np.zeros((20, 20, 3), dtype=np.uint8)
+    window.state.current_labels = current_labels
+    window.state.selected_labels = {0}
+    window.change_combo.setCurrentText("person")
+    saved_labels = {}
+    monkeypatch.setattr("ui.main_window.cv2.imread", lambda path: window.state.current_image)
+    monkeypatch.setattr(
+        window,
+        "_load_track_aware_labels_for_frame",
+        lambda path: other_labels,
+    )
+    monkeypatch.setattr(
+        "ui.main_window.auto_save_labels",
+        lambda state: saved_labels.setdefault(state.current_image_path, state.current_labels),
+    )
+    monkeypatch.setattr(window, "_save_tracking_state", lambda: None)
+    monkeypatch.setattr(window, "_rebuild_track_summaries", lambda: None)
+
+    window._change_selected_class()
+
+    assert window.state.current_labels[0][0] == 0
+    assert window.state.current_labels[1] == current_labels[1]
+    assert saved_labels[other_path][0][0] == 0
+    assert saved_labels[other_path][1] == other_labels[1]

@@ -2,7 +2,12 @@
 
 import numpy as np
 
-from core.utils import mask_to_binary_image, point_in_quad, remove_labels_in_box
+from core.utils import (
+    mask_to_binary_image,
+    merge_segmentation_labels,
+    point_in_quad,
+    remove_labels_in_box,
+)
 
 
 def test_mask_to_binary_image():
@@ -32,3 +37,20 @@ def test_remove_labels_in_box_keeps_only_non_intersecting_labels():
     remaining = remove_labels_in_box(5, 5, 35, 35, labels, 100, 100)
 
     assert remaining == [labels[1]]
+
+
+def test_merge_segmentation_labels_unions_masks_and_keeps_metadata():
+    """Merging labels should produce one polygon covering both source masks."""
+    labels = [
+        (1, [], [], np.pad(np.ones((20, 20), dtype=np.uint8), ((10, 70), (10, 70))), 0.72, 4),
+        (1, [], [], np.pad(np.ones((20, 20), dtype=np.uint8), ((40, 40), (40, 40))), 0.91, 4),
+    ]
+
+    merged = merge_segmentation_labels(labels, 100, 100)
+
+    assert merged is not None
+    assert merged[0] == 1
+    assert merged[4] == 0.91
+    assert merged[5] == 4
+    assert merged[3][15, 15] == 1
+    assert merged[3][45, 45] == 1

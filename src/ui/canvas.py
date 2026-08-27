@@ -527,7 +527,7 @@ class AnnotationCanvas(QWidget):
         painter.drawRect(self.rect())
         painter.setPen(QPen(QColor(255, 200, 50)))
         painter.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
-        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "SAM inference running...")
+        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "SAM 3 inference running...")
         painter.end()
 
     # --- paint ---

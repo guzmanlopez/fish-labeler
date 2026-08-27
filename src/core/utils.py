@@ -252,6 +252,48 @@ def remove_labels_in_box(x1, y1, x2, y2, labels, img_w, img_h):
     return [label for index, label in enumerate(labels) if index not in indices_to_remove]
 
 
+def merge_segmentation_labels(labels, img_w, img_h, epsilon_ratio=0.005):
+    """Return one label containing the union of the supplied segmentation masks."""
+    if not labels or img_w <= 0 or img_h <= 0:
+        return None
+
+    merged_mask = _union_label_masks(labels, img_w, img_h)
+
+    polygon = mask_to_polygon(merged_mask, img_w, img_h, epsilon_ratio)
+    quad = mask_to_quad(merged_mask, img_w, img_h)
+    if polygon is None or quad is None:
+        return None
+
+    class_id = labels[0][0]
+    scores = [label[4] for label in labels if len(label) > 4 and label[4] is not None]
+    merged_label = (class_id, quad, polygon, merged_mask, max(scores) if scores else None)
+    track_ids = [label[5] for label in labels if len(label) > 5 and label[5] is not None]
+    if track_ids and len(track_ids) == len(labels) and len(set(track_ids)) == 1:
+        merged_label += (track_ids[0],)
+    return merged_label
+
+
+def _union_label_masks(labels, img_w, img_h):
+    """Return the binary union of the masks or polygons in a label sequence."""
+    merged_mask = np.zeros((img_h, img_w), dtype=np.uint8)
+    for label in labels:
+        mask = _label_mask_for_merge(label, img_w, img_h)
+        if mask is not None:
+            merged_mask = cv2.bitwise_or(merged_mask, mask)
+    return merged_mask
+
+
+def _label_mask_for_merge(label, img_w, img_h):
+    """Return one label's mask at the requested image dimensions."""
+    mask = label[3] if len(label) > 3 and label[3] is not None else None
+    if mask is None:
+        polygon = label[2] if len(label) > 2 and label[2] else label[1]
+        if not polygon:
+            return None
+        mask = polygon_to_mask(polygon, img_w, img_h)
+    return _normalize_overlap_mask(mask, img_w, img_h)
+
+
 # ------------------------------------------------------------------
 # COCO format
 # ------------------------------------------------------------------
