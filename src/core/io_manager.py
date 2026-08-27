@@ -10,7 +10,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from .utils import mask_to_obb, polygon_to_mask
+from .utils import mask_to_quad, polygon_to_mask
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
@@ -120,8 +120,31 @@ def load_persisted_classes():
         return ["fish"]
 
 
+def load_dataset_classes(dataset_folder):
+    """Load a dataset's class mapping, preferring its video export configuration."""
+    dataset_path = Path(dataset_folder)
+    run_config_path = dataset_path / "run_config.json"
+    try:
+        with open(run_config_path, encoding="utf-8") as f:
+            classes = json.load(f).get("classes", [])
+        if isinstance(classes, list) and all(isinstance(name, str) and name for name in classes):
+            return classes
+    except FileNotFoundError, json.JSONDecodeError, OSError:
+        pass
+
+    classes_path = dataset_path / "classes.txt"
+    try:
+        with open(classes_path, encoding="utf-8") as f:
+            classes = [line.strip() for line in f if line.strip()]
+        if classes:
+            return classes
+    except OSError:
+        pass
+    return None
+
+
 def _load_segmentation_labels(seg_label_path, img_w, img_h):
-    """Load labels from a YOLO segmentation file."""
+    """Load normalized polygon labels from a YOLO segmentation file."""
     labels = []
     with open(seg_label_path) as f:
         for line in f:
@@ -131,38 +154,37 @@ def _load_segmentation_labels(seg_label_path, img_w, img_h):
             class_id = int(parts[0])
             polygon_coords = [float(x) for x in parts[1:]]
             mask = polygon_to_mask(polygon_coords, img_w, img_h)
-            obb_coords = mask_to_obb(mask, img_w, img_h)
-            if obb_coords:
-                labels.append((class_id, obb_coords, polygon_coords, mask, None))
+            quad_coords = mask_to_quad(mask, img_w, img_h)
+            if quad_coords:
+                labels.append((class_id, quad_coords, polygon_coords, mask, None))
     return labels
 
 
-def _load_obb_labels(label_path, img_w, img_h):
-    """Load labels from the legacy OBB text format."""
-    labels = []
-    with open(label_path) as f:
-        for line in f:
-            parts = line.strip().split()
-            if len(parts) != 9:
-                continue
-            class_id = int(parts[0])
-            coords = [float(x) for x in parts[1:]]
-            mask = polygon_to_mask(coords, img_w, img_h)
-            labels.append((class_id, coords, coords, mask, None))
-    return labels
-
-
-def load_existing_labels(label_path, seg_label_path, current_image):
-    """Docstring for load_existing_labels."""
-    """Load existing annotations, returns labels list"""
+def load_existing_labels(label_path, seg_label_path, current_image, annotation_path=None):
+    """Load saved YOLO polygons from the current or legacy label directory."""
     img_h, img_w = current_image.shape[:2]
 
-    if seg_label_path and seg_label_path.exists():
-        return _load_segmentation_labels(seg_label_path, img_w, img_h)
-
+    labels = []
     if label_path and label_path.exists():
-        return _load_obb_labels(label_path, img_w, img_h)
-    return []
+        labels = _load_segmentation_labels(label_path, img_w, img_h)
+    elif seg_label_path and seg_label_path.exists():
+        labels = _load_segmentation_labels(seg_label_path, img_w, img_h)
+
+    if not labels or not annotation_path or not annotation_path.exists():
+        return labels
+    try:
+        detections = json.loads(annotation_path.read_text(encoding="utf-8")).get("detections", [])
+        scores = [
+            detection.get("confidence") for detection in detections if detection.get("mask_polygon")
+        ]
+    except json.JSONDecodeError, OSError:
+        return labels
+    return [
+        label[:4] + (float(scores[index]),)
+        if index < len(scores) and isinstance(scores[index], int | float)
+        else label
+        for index, label in enumerate(labels)
+    ]
 
 
 def label_is_visible(label, classes, class_thresholds, default_threshold=0.25):
@@ -190,8 +212,8 @@ def _delete_annotation_files(output_path, img_stem):
     """Delete persisted annotation artifacts for a frame when no labels remain."""
     deleted = []
     for subfolder, extension, name in [
-        ("labels", ".txt", "OBB"),
-        ("labels_seg", ".txt", "Seg"),
+        ("labels", ".txt", "Seg"),
+        ("labels_seg", ".txt", "Legacy seg"),
         ("masks", ".png", "Mask"),
     ]:
         path = output_path / subfolder / f"{img_stem}{extension}"
@@ -213,19 +235,9 @@ def _copy_frame_image(output_path, current_image_path):
             pass
 
 
-def _save_obb_labels(output_path, img_stem, labels):
-    """Write OBB label text output."""
-    folder = output_path / "labels"
-    folder.mkdir(parents=True, exist_ok=True)
-    with open(folder / f"{img_stem}.txt", "w") as f:
-        for label in labels:
-            coords_str = " ".join(f"{coord:.6f}" for coord in label[1])
-            f.write(f"{label[0]} {coords_str}\n")
-
-
 def _save_segmentation_labels(output_path, img_stem, labels):
     """Write polygon segmentation label text output."""
-    folder = output_path / "labels_seg"
+    folder = output_path / "labels"
     folder.mkdir(parents=True, exist_ok=True)
     with open(folder / f"{img_stem}.txt", "w") as f:
         for label in labels:
@@ -280,10 +292,6 @@ def auto_save_labels(state):
     _copy_frame_image(output_path, state.current_image_path)
 
     saved = []
-
-    if state.output_formats.get("obb", False):
-        _save_obb_labels(output_path, img_stem, visible_labels)
-        saved.append("OBB")
 
     if state.output_formats.get("seg", True):
         _save_segmentation_labels(output_path, img_stem, visible_labels)

@@ -3,10 +3,12 @@
 from pathlib import Path
 
 import numpy as np
-from PyQt6.QtWidgets import QAbstractItemView, QPushButton
+from PyQt6.QtCore import QPoint, QPointF, Qt
+from PyQt6.QtGui import QWheelEvent
+from PyQt6.QtWidgets import QAbstractItemView, QPushButton, QScrollArea, QSlider
 
 from ui.canvas import LABEL_COLORS, has_canvas_label_icon
-from ui.main_window import ANNOTATION_COLOR_ROLE, MainWindow, has_annotation_icon
+from ui.main_window import ANNOTATION_COLOR_ROLE, LockedSlider, MainWindow, has_annotation_icon
 
 
 class DummySamEngine:
@@ -23,7 +25,7 @@ def build_window(monkeypatch, qtbot):
         "ui.main_window.load_persisted_classes",
         lambda: ["person", "fish", "buoy"],
     )
-    monkeypatch.setattr("ui.main_window.load_config", lambda: {})
+    monkeypatch.setattr("ui.main_window.load_config", dict)
 
     window = MainWindow()
     qtbot.addWidget(window)
@@ -48,9 +50,9 @@ def test_mainwindow_init_uses_annotation_delegate(monkeypatch, qtbot):
     assert window.label_list.spacing() == 2
     assert window.label_list.minimumHeight() == 360
     assert window.label_list.maximumHeight() == 640
-    assert window.mask_opacity_slider.value() == 62
-    assert window.mask_opacity_label.text() == "62%"
-    assert window.canvas.mask_opacity == 0.62
+    assert window.mask_opacity_slider.value() == 30
+    assert window.mask_opacity_label.text() == "30%"
+    assert window.canvas.mask_opacity == 0.30
 
 
 def test_mainwindow_starts_with_secondary_sections_collapsed(monkeypatch, qtbot):
@@ -58,10 +60,10 @@ def test_mainwindow_starts_with_secondary_sections_collapsed(monkeypatch, qtbot)
     window = build_window(monkeypatch, qtbot)
 
     assert not window.sam3_sec.content_area.isHidden()
-    assert not window.tracking_sec.toggle_btn.isChecked()
-    assert window.tracking_sec.content_area.isHidden()
-    assert window.track_linking_sec.toggle_btn.isChecked()
-    assert not window.track_linking_sec.content_area.isHidden()
+    assert window.tracking_sec.toggle_btn.isChecked()
+    assert not window.tracking_sec.content_area.isHidden()
+    assert not window.track_linking_sec.toggle_btn.isChecked()
+    assert window.track_linking_sec.content_area.isHidden()
     assert not window.track_stitching_sec.toggle_btn.isChecked()
     assert window.track_stitching_sec.content_area.isHidden()
     assert window.track_manager_sec.toggle_btn.isChecked()
@@ -77,7 +79,7 @@ def test_expanded_sections_use_higher_contrast_header_text(monkeypatch, qtbot):
     window = build_window(monkeypatch, qtbot)
 
     assert "#F5F7FF" in window.sam3_sec.toggle_btn.styleSheet()
-    assert "#8B949E" in window.tracking_sec.toggle_btn.styleSheet()
+    assert "#F5F7FF" in window.tracking_sec.toggle_btn.styleSheet()
 
 
 def test_tracking_section_contains_controls(monkeypatch, qtbot):
@@ -96,6 +98,16 @@ def test_tracking_section_contains_controls(monkeypatch, qtbot):
     assert find_button(window, "Merge").toolTip()
 
 
+def test_tracking_controls_are_in_a_scrollable_left_panel(monkeypatch, qtbot):
+    """The left panel should scroll rather than compress Tracklet Linking controls."""
+    window = build_window(monkeypatch, qtbot)
+
+    left_panel = window.findChild(QScrollArea, "leftPanel")
+
+    assert left_panel is not None
+    assert left_panel.widget().isAncestorOf(window.track_linking_sec)
+
+
 def test_buttons_and_tracking_controls_expose_tooltips(monkeypatch, qtbot):
     """Key actions and tracking controls should explain themselves via tooltips."""
     window = build_window(monkeypatch, qtbot)
@@ -106,6 +118,7 @@ def test_buttons_and_tracking_controls_expose_tooltips(monkeypatch, qtbot):
     assert "selected annotations" in find_button(window, "Apply track").toolTip().lower()
     assert "visible annotations" in find_button(window, "Save").toolTip().lower()
     assert "loaded sequence" in find_button(window, "Clear tracks").toolTip().lower()
+    assert "every loaded frame" in find_button(window, "Remove from bbox").toolTip().lower()
 
 
 def test_sam3_section_collapses_all_segmentation_controls(monkeypatch, qtbot):
@@ -189,6 +202,33 @@ def test_mask_opacity_slider_updates_canvas(monkeypatch, qtbot):
     assert window.mask_opacity_label.text() == "85%"
 
 
+def test_sliders_ignore_wheel_and_keypad_input(monkeypatch, qtbot):
+    """Sliders should only change through direct pointer interaction."""
+    window = build_window(monkeypatch, qtbot)
+    sliders = window.findChildren(QSlider)
+
+    assert sliders
+    assert all(isinstance(slider, LockedSlider) for slider in sliders)
+
+    slider = window.mask_opacity_slider
+    original_value = slider.value()
+    qtbot.keyClick(slider, Qt.Key.Key_Right)
+    slider.wheelEvent(
+        QWheelEvent(
+            QPointF(0, 0),
+            QPointF(0, 0),
+            QPoint(),
+            QPoint(0, 120),
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+            Qt.ScrollPhase.NoScrollPhase,
+            False,
+        )
+    )
+
+    assert slider.value() == original_value
+
+
 def test_point_prompt_controls_follow_visual_mode(monkeypatch, qtbot):
     """Point prompt controls should be visible only in point mode."""
     window = build_window(monkeypatch, qtbot)
@@ -243,6 +283,69 @@ def test_point_prompt_persistence_across_frames_is_configurable(monkeypatch, qtb
     assert window.state.negative_prompt_points == [(50, 60)]
 
 
+def test_remove_from_bbox_removes_intersecting_labels_from_every_frame(monkeypatch, qtbot):
+    """A removal rectangle should apply to the active frame and all other frames."""
+    window = build_window(monkeypatch, qtbot)
+    image = np.zeros((100, 100, 3), dtype=np.uint8)
+    current_path = Path("frame_0001.jpg")
+    other_path = Path("frame_0002.jpg")
+    current_labels = [
+        (0, [0.1, 0.1, 0.3, 0.1, 0.3, 0.3, 0.1, 0.3], [], None, None),
+        (1, [0.7, 0.7, 0.9, 0.7, 0.9, 0.9, 0.7, 0.9], [], None, None),
+    ]
+    other_labels = [
+        (0, [0.15, 0.15, 0.25, 0.15, 0.25, 0.25, 0.15, 0.25], [], None, None),
+        (1, [0.6, 0.6, 0.8, 0.6, 0.8, 0.8, 0.6, 0.8], [], None, None),
+    ]
+    saved_labels = []
+
+    window.state.image_list = [current_path, other_path]
+    window.state.current_image_path = current_path
+    window.state.current_image = image
+    window.state.current_labels = current_labels
+    monkeypatch.setattr("ui.main_window.cv2.imread", lambda path: image.copy())
+    monkeypatch.setattr(
+        window,
+        "_load_track_aware_labels_for_frame",
+        lambda image_path: other_labels if image_path == other_path else current_labels,
+    )
+    monkeypatch.setattr(
+        "ui.main_window.auto_save_labels",
+        lambda state: saved_labels.append(list(state.current_labels)),
+    )
+    monkeypatch.setattr(window, "_save_tracking_state", lambda: None)
+
+    window._remove_from_bbox(5, 5, 35, 35)
+
+    assert window.state.current_labels == [current_labels[1]]
+    assert [current_labels[1]] in saved_labels
+    assert [other_labels[1]] in saved_labels
+    assert window.status_label.text() == "Removed 2 annotations across all frames"
+
+
+def test_merge_selected_annotations_replaces_noncontiguous_labels(monkeypatch, qtbot):
+    """Annotation merging should keep the merged row at the first selected position."""
+    window = build_window(monkeypatch, qtbot)
+    image = np.zeros((100, 100, 3), dtype=np.uint8)
+    labels = [
+        (1, [], [], np.pad(np.ones((20, 20), dtype=np.uint8), ((10, 70), (10, 70))), 0.72),
+        (0, [], [], np.pad(np.ones((20, 20), dtype=np.uint8), ((40, 40), (40, 40))), 0.80),
+        (1, [], [], np.pad(np.ones((20, 20), dtype=np.uint8), ((70, 10), (70, 10))), 0.91),
+    ]
+    window.state.current_image = image
+    window.state.current_labels = labels
+    window.state.selected_labels = {0, 2}
+    monkeypatch.setattr(window, "_save_tracking_state", lambda: None)
+
+    window._merge_selected_annotations()
+
+    assert len(window.state.current_labels) == 2
+    assert window.state.current_labels[0][0] == 1
+    assert window.state.current_labels[1] == labels[1]
+    assert window.state.selected_labels == {0}
+    assert window.status_label.text() == "Merged 2 annotations"
+
+
 def test_load_current_image_replots_kept_point_prompts(monkeypatch, qtbot):
     """Loading another frame should re-apply kept point prompts onto the canvas."""
     window = build_window(monkeypatch, qtbot)
@@ -264,6 +367,96 @@ def test_load_current_image_replots_kept_point_prompts(monkeypatch, qtbot):
     assert window.canvas._positive_prompt_points == [(10, 20)]
     assert window.canvas._negative_prompt_points == [(30, 15)]
     assert window.point_prompt_counts_label.text() == "Positive: 1 | Negative: 1"
+
+
+def test_load_folder_recognizes_dataset_run_and_loads_annotations(monkeypatch, qtbot, tmp_path):
+    """Selecting a run should find nested images and labels beside its images folder."""
+    window = build_window(monkeypatch, qtbot)
+    run_folder = tmp_path / "sample-run"
+    image_folder = run_folder / "images" / "camera-a"
+    image_folder.mkdir(parents=True)
+    (run_folder / "labels_seg").mkdir()
+    image_path = image_folder / "frame_0001.jpg"
+    image_path.touch()
+    (run_folder / "labels_seg" / "frame_0001.txt").write_text(
+        "1 0.1 0.1 0.9 0.1 0.9 0.9 0.1 0.9\n", encoding="utf-8"
+    )
+    (run_folder / "run_config.json").write_text(
+        '{"classes": ["fish", "swordfish"]}', encoding="utf-8"
+    )
+    image = np.zeros((32, 48, 3), dtype=np.uint8)
+    monkeypatch.setattr("ui.main_window.cv2.imread", lambda path: image.copy())
+    monkeypatch.setattr("ui.main_window.load_progress", lambda folder: 0)
+    monkeypatch.setattr("ui.main_window.save_config", lambda *args: None)
+
+    window.folder_input.setText(str(run_folder))
+    window._load_folder()
+
+    assert window.folder_input.text() == str(run_folder / "images")
+    assert window.output_input.text() == "sample-run"
+    assert window.state.output_folder == run_folder
+    assert window.state.image_list == [image_path]
+    assert window.state.classes == ["fish", "swordfish", "person", "buoy"]
+    assert len(window.state.current_labels) == 1
+
+
+def test_load_folder_preserves_persisted_classes_beyond_dataset_mapping(
+    monkeypatch, qtbot, tmp_path
+):
+    """Dataset loading should keep newly added classes available across app opens."""
+    window = build_window(monkeypatch, qtbot)
+    run_folder = tmp_path / "sample-run"
+    image_folder = run_folder / "images"
+    image_folder.mkdir(parents=True)
+    (run_folder / "labels").mkdir()
+    image_path = image_folder / "frame_0001.jpg"
+    image_path.touch()
+    (run_folder / "labels" / "frame_0001.txt").write_text(
+        "4 0.1 0.1 0.9 0.1 0.9 0.9 0.1 0.9\n", encoding="utf-8"
+    )
+    (run_folder / "run_config.json").write_text(
+        '{"classes": ["fish", "person", "buoy"]}', encoding="utf-8"
+    )
+    image = np.zeros((32, 48, 3), dtype=np.uint8)
+    monkeypatch.setattr("ui.main_window.cv2.imread", lambda path: image.copy())
+    monkeypatch.setattr("ui.main_window.load_progress", lambda folder: 0)
+    monkeypatch.setattr("ui.main_window.save_config", lambda *args: None)
+    monkeypatch.setattr("ui.main_window.persist_classes", lambda classes: None)
+
+    window.state.classes = ["fish", "person", "buoy", "shark", "YFT"]
+    window.folder_input.setText(str(run_folder))
+    window._load_folder()
+
+    assert window.state.classes == ["fish", "person", "buoy", "shark", "YFT"]
+    assert window.state.current_labels[0][0] == 4
+    assert window.label_list.item(0).text().endswith("YFT")
+
+
+def test_load_folder_skips_unannotated_saved_progress(monkeypatch, qtbot, tmp_path):
+    """Saved progress should not hide later video-workflow detections on startup."""
+    window = build_window(monkeypatch, qtbot)
+    run_folder = tmp_path / "sample-run"
+    image_folder = run_folder / "images"
+    labels_folder = run_folder / "labels"
+    image_folder.mkdir(parents=True)
+    labels_folder.mkdir()
+    unannotated_image = image_folder / "frame_000000.jpg"
+    annotated_image = image_folder / "frame_000012.jpg"
+    unannotated_image.touch()
+    annotated_image.touch()
+    (labels_folder / "frame_000012.txt").write_text(
+        "1 0.1 0.1 0.9 0.1 0.9 0.9 0.1 0.9\n", encoding="utf-8"
+    )
+    image = np.zeros((32, 48, 3), dtype=np.uint8)
+    monkeypatch.setattr("ui.main_window.cv2.imread", lambda path: image.copy())
+    monkeypatch.setattr("ui.main_window.load_progress", lambda folder: 0)
+    monkeypatch.setattr("ui.main_window.save_config", lambda *args: None)
+
+    window.folder_input.setText(str(image_folder))
+    window._load_folder()
+
+    assert window.state.current_image_path == annotated_image
+    assert len(window.state.current_labels) == 1
 
 
 def test_successful_point_inference_keeps_prompt_markers_visible(monkeypatch, qtbot):
@@ -318,6 +511,38 @@ def test_refresh_track_list_uses_class_colors(monkeypatch, qtbot):
     assert window.track_list.item(0).data(ANNOTATION_COLOR_ROLE) == LABEL_COLORS[1]
 
 
+def test_double_clicking_track_navigates_to_first_track_frame(monkeypatch, qtbot):
+    """Double-clicking a track should load its zero-based first frame index."""
+    window = build_window(monkeypatch, qtbot)
+    window.state.image_list = [Path("frame_0001.jpg"), Path("frame_0002.jpg")]
+    window.state.current_index = 0
+    window.state.current_image_path = window.state.image_list[0]
+    window.state.track_summaries = {
+        7: {"track_id": 7, "start_frame": 1, "end_frame": 1},
+    }
+    window._refresh_track_list()
+    saved_progress = []
+    monkeypatch.setattr("ui.main_window.auto_save_labels", lambda state: None)
+    monkeypatch.setattr(window, "_sync_current_frame_track_ids", lambda: None)
+    monkeypatch.setattr(window, "_save_tracking_state", lambda: None)
+    monkeypatch.setattr(
+        "ui.main_window.save_progress",
+        lambda folder, index, image_list: saved_progress.append((folder, index, image_list)),
+    )
+    loaded_indices = []
+    monkeypatch.setattr(
+        window,
+        "_load_current_image",
+        lambda: loaded_indices.append(window.state.current_index),
+    )
+
+    window._on_track_double_clicked(window.track_list.item(0))
+
+    assert window.state.current_index == 1
+    assert loaded_indices == [1]
+    assert saved_progress == [(Path("."), 1, window.state.image_list)]
+
+
 def test_merge_selected_tracks_rewrites_ids_and_summaries(monkeypatch, qtbot):
     """Merging selected tracks should keep the lowest id and remap all selected tracks to it."""
     window = build_window(monkeypatch, qtbot)
@@ -362,3 +587,114 @@ def test_merge_selected_tracks_rewrites_ids_and_summaries(monkeypatch, qtbot):
     assert window.state.frame_track_ids["frame_0002.jpg"] == [2, None, 2]
     assert all(label[5] == 2 for label in window.state.current_labels)
     assert set(window.state.track_summaries) == {2}
+
+
+def test_change_selected_class_updates_the_selected_track_across_frames(monkeypatch, qtbot):
+    """Changing a tracked annotation class should update that track in every frame."""
+    window = build_window(monkeypatch, qtbot)
+    current_path = Path("frame_0001.jpg")
+    other_path = Path("frame_0002.jpg")
+    current_labels = [(1, [], [], None, 0.9, 7), (0, [], [], None, 0.8, 3)]
+    other_labels = [(1, [], [], None, 0.85, 7), (0, [], [], None, 0.75, 3)]
+    window.state.image_list = [current_path, other_path]
+    window.state.current_image_path = current_path
+    window.state.current_image = np.zeros((20, 20, 3), dtype=np.uint8)
+    window.state.current_labels = current_labels
+    window.state.selected_labels = {0}
+    window.change_combo.setCurrentText("person")
+    saved_labels = {}
+    monkeypatch.setattr("ui.main_window.cv2.imread", lambda path: window.state.current_image)
+    monkeypatch.setattr(
+        window,
+        "_load_track_aware_labels_for_frame",
+        lambda path: other_labels,
+    )
+    monkeypatch.setattr(
+        "ui.main_window.auto_save_labels",
+        lambda state: saved_labels.setdefault(state.current_image_path, state.current_labels),
+    )
+    monkeypatch.setattr(window, "_save_tracking_state", lambda: None)
+    monkeypatch.setattr(window, "_rebuild_track_summaries", lambda: None)
+
+    window._change_selected_class()
+
+    assert window.state.current_labels[0][0] == 0
+    assert window.state.current_labels[1] == current_labels[1]
+    assert saved_labels[other_path][0][0] == 0
+    assert saved_labels[other_path][1] == other_labels[1]
+
+
+def test_assigning_untracked_annotation_to_existing_track_uses_track_class(monkeypatch, qtbot):
+    """Joining an existing track should copy its class onto an untracked annotation."""
+    window = build_window(monkeypatch, qtbot)
+    window.state.current_labels = [(0, [], [], None, 0.8), (1, [], [], None, 0.9, 7)]
+    window.state.selected_labels = {0}
+    window.state.track_summaries = {7: {"track_id": 7, "class_id": 1}}
+    window.track_id_input.setText("7")
+    monkeypatch.setattr(window, "_save_tracking_state", lambda: None)
+    monkeypatch.setattr(window, "_rebuild_track_summaries", lambda: None)
+
+    window._apply_track_to_selection()
+
+    assert window.state.current_labels[0][0] == 1
+    assert window.state.current_labels[0][5] == 7
+    assert window.state.current_labels[1][0] == 1
+    assert window.state.current_labels[1][5] == 7
+
+
+def test_track_panel_selection_and_removal_clear_track_assignments(monkeypatch, qtbot):
+    """Selecting a track row should select its labels, and deleting it should clear its IDs."""
+    window = build_window(monkeypatch, qtbot)
+    window.state.current_image_path = Path("frame_0001.jpg")
+    window.state.current_labels = [
+        (1, [], [], None, 0.9, 7),
+        (0, [], [], None, 0.8, 3),
+    ]
+    window.state.frame_track_ids = {"frame_0001.jpg": [7, 3], "frame_0002.jpg": [7, None]}
+    window.state.track_summaries = {
+        3: {"track_id": 3, "class_id": 0, "start_frame": 0, "end_frame": 0},
+        7: {"track_id": 7, "class_id": 1, "start_frame": 0, "end_frame": 1},
+    }
+    window._refresh_labels_ui()
+    window.track_list.item(1).setSelected(True)
+    window._on_track_list_selection()
+
+    assert window.state.selected_track_ids == {7}
+    assert window.state.selected_labels == {0}
+
+    window.track_id_input.clear()
+    monkeypatch.setattr(window, "_save_tracking_state", lambda: None)
+    window._delete_selected_track()
+
+    assert window.state.frame_track_ids == {"frame_0001.jpg": [None, 3]}
+    assert window.state.current_labels[0][5] is None
+    assert window.state.current_labels[1][5] == 3
+    assert 7 not in window.state.track_summaries
+
+
+def test_changing_track_class_refreshes_annotation_and_track_colors(monkeypatch, qtbot):
+    """Changing a track class should update its rendered class IDs and row color."""
+    window = build_window(monkeypatch, qtbot)
+    window.state.current_image = np.zeros((20, 20, 3), dtype=np.uint8)
+    window.state.current_image_path = Path("frame_0001.jpg")
+    window.state.current_labels = [(1, [], [], None, 0.9, 7)]
+    window.state.image_list = [window.state.current_image_path]
+    window.state.frame_track_ids = {"frame_0001.jpg": [7]}
+    window.state.track_summaries = {
+        7: {"track_id": 7, "class_id": 1, "start_frame": 0, "end_frame": 0}
+    }
+    window.state.selected_labels = {0}
+    window.change_combo.setCurrentText("person")
+    monkeypatch.setattr("ui.main_window.auto_save_labels", lambda state: None)
+    monkeypatch.setattr(window, "_save_tracking_state", lambda: None)
+
+    def rebuild_track_summaries():
+        window.state.track_summaries[7]["class_id"] = 0
+
+    monkeypatch.setattr(window, "_rebuild_track_summaries", rebuild_track_summaries)
+
+    window._change_selected_class()
+
+    assert window.state.current_labels[0][0] == 0
+    assert window.canvas._labels[0][0] == 0
+    assert window.track_list.item(0).data(ANNOTATION_COLOR_ROLE).name() == LABEL_COLORS[0].name()

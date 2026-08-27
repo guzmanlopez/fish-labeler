@@ -109,6 +109,7 @@ class AnnotationCanvas(QWidget):
 
     point_clicked = pyqtSignal(int, int)
     box_drawn = pyqtSignal(int, int, int, int)
+    removal_box_drawn = pyqtSignal(int, int, int, int)
     label_selected = pyqtSignal(int)
     cursor_moved = pyqtSignal(int, int)
 
@@ -140,7 +141,7 @@ class AnnotationCanvas(QWidget):
         self._cursor_img = (-1, -1)
         self._busy = False
         self._space_held = False
-        self.mask_opacity = 0.62
+        self.mask_opacity = 0.30
         self._positive_prompt_points = []
         self._negative_prompt_points = []
 
@@ -223,7 +224,7 @@ class AnnotationCanvas(QWidget):
         """Docstring for _upd_cursor."""
         if self._busy:
             self.setCursor(Qt.CursorShape.WaitCursor)
-        elif self._mode in ("box", "point", "click"):
+        elif self._mode in ("box", "point", "click", "remove_box"):
             self.setCursor(Qt.CursorShape.CrossCursor)
         else:
             self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -358,7 +359,7 @@ class AnnotationCanvas(QWidget):
             if not self._is_label_visible(label):
                 continue
 
-            class_id, obb = label[0], label[1]
+            class_id, quad = label[0], label[1]
             is_selected = index in self._selected
             is_hovered = index == self._hover_label
             color = SELECTED_COLOR if is_selected else LABEL_COLORS[class_id % len(LABEL_COLORS)]
@@ -373,8 +374,8 @@ class AnnotationCanvas(QWidget):
             painter.setBrush(QBrush(fill_color))
 
             if getattr(self, "display_aabb", False):
-                xs = [obb[i] * self._img_w for i in range(0, 8, 2)]
-                ys = [obb[i + 1] * self._img_h for i in range(0, 8, 2)]
+                xs = [quad[i] * self._img_w for i in range(0, 8, 2)]
+                ys = [quad[i + 1] * self._img_h for i in range(0, 8, 2)]
                 min_x, max_x = min(xs), max(xs)
                 min_y, max_y = min(ys), max(ys)
                 painter.drawRect(QRectF(min_x, min_y, max_x - min_x, max_y - min_y))
@@ -384,8 +385,8 @@ class AnnotationCanvas(QWidget):
             for coord_index in range(0, 8, 2):
                 polygon.append(
                     QPointF(
-                        obb[coord_index] * self._img_w,
-                        obb[coord_index + 1] * self._img_h,
+                        quad[coord_index] * self._img_w,
+                        quad[coord_index + 1] * self._img_h,
                     )
                 )
             painter.drawPolygon(polygon)
@@ -403,7 +404,7 @@ class AnnotationCanvas(QWidget):
             if not self._is_label_visible(label):
                 continue
 
-            class_id, obb = label[0], label[1]
+            class_id, quad = label[0], label[1]
             class_name = self._class_name_for_label(label)
             score = self._label_score(label)
             track_id = label[5] if len(label) > 5 else None
@@ -416,12 +417,12 @@ class AnnotationCanvas(QWidget):
             pixmap = get_class_pixmap(class_name) if has_canvas_label_icon(class_name) else None
 
             if getattr(self, "display_aabb", False):
-                xs = [obb[i] * self._img_w for i in range(0, 8, 2)]
-                ys = [obb[i + 1] * self._img_h for i in range(0, 8, 2)]
+                xs = [quad[i] * self._img_w for i in range(0, 8, 2)]
+                ys = [quad[i + 1] * self._img_h for i in range(0, 8, 2)]
                 text_x, text_y = min(xs), min(ys) - 3 * inverse_zoom
             else:
-                text_x = obb[0] * self._img_w
-                text_y = obb[1] * self._img_h - 3 * inverse_zoom
+                text_x = quad[0] * self._img_w
+                text_y = quad[1] * self._img_h - 3 * inverse_zoom
 
             text_rect = metrics.boundingRect(text)
             icon_size = text_rect.height() if pixmap else 0
@@ -526,7 +527,7 @@ class AnnotationCanvas(QWidget):
         painter.drawRect(self.rect())
         painter.setPen(QPen(QColor(255, 200, 50)))
         painter.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
-        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "SAM inference running...")
+        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "SAM3 inference running...")
         painter.end()
 
     # --- paint ---
@@ -589,7 +590,7 @@ class AnnotationCanvas(QWidget):
             return
         if a0.button() != Qt.MouseButton.LeftButton or self._busy:
             return
-        if self._mode == "box":
+        if self._mode in ("box", "remove_box"):
             self._begin_drag(a0.pos())
             return
         if self._mode == "select":
@@ -638,6 +639,8 @@ class AnnotationCanvas(QWidget):
             return
         if self._mode == "box":
             self.box_drawn.emit(sx, sy, ex, ey)
+        elif self._mode == "remove_box":
+            self.removal_box_drawn.emit(sx, sy, ex, ey)
         elif self._mode == "select":
             from core.utils import find_labels_in_box
 

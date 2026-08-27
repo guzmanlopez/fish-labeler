@@ -1,5 +1,5 @@
 """
-SAM 3 model loading and inference
+SAM3 model loading and inference
 Preserves original load_sam3_model / load_sam_model logic
 """
 
@@ -10,11 +10,11 @@ import cv2
 
 from core.logger import logger
 from core.utils import (
-    box_to_obb,
+    box_to_quad,
     check_mask_overlap,
     mask_to_binary_image,
-    mask_to_obb,
     mask_to_polygon,
+    mask_to_quad,
     polygon_to_mask,
 )
 
@@ -25,7 +25,7 @@ DEFAULT_MODEL_PATH = Path(__file__).resolve().parents[1] / "models" / "sam3.pt"
 class SAMEngine:
     """SAMEngine class."""
 
-    """Wrapper for SAM 3 model operations"""
+    """Wrapper for SAM3 model operations"""
 
     def __init__(self, model_path=DEFAULT_MODEL_PATH, device="cuda:0"):
         """Docstring for __init__."""
@@ -40,15 +40,15 @@ class SAMEngine:
             from ultralytics.models.sam import SAM3SemanticPredictor
 
             self._predictor = SAM3SemanticPredictor(
-                overrides=dict(
-                    conf=DEFAULT_SAM_CONF,
-                    model=self.model_path,
-                    device=self.device,
-                    half=True,
-                    verbose=False,
-                )
+                overrides={
+                    "conf": DEFAULT_SAM_CONF,
+                    "model": self.model_path,
+                    "device": self.device,
+                    "quantize": 16,
+                    "verbose": False,
+                },
             )
-            logger.info(f"[OK] SAM 3 semantic model loaded ({self.device})")
+            logger.info(f"[OK] SAM3 semantic model loaded ({self.device})")
         return self._predictor
 
     def _ensure_sam(self):
@@ -84,8 +84,8 @@ class SAMEngine:
         missing_message,
     ):
         """Convert a SAM mask into a stored label tuple after overlap checks."""
-        obb = mask_to_obb(mask, img_w, img_h)
-        if obb is None:
+        quad = mask_to_quad(mask, img_w, img_h)
+        if quad is None:
             return None, missing_message
 
         poly = mask_to_polygon(mask, img_w, img_h, polygon_epsilon)
@@ -98,7 +98,7 @@ class SAMEngine:
                 None,
                 f"Overlaps with annotation {overlap_index + 1} ({overlap_ratio * 100:.0f}%)",
             )
-        return (class_id, obb, poly, mask_binary, 1.0), success_message
+        return (class_id, quad, poly, mask_binary, 1.0), success_message
 
     def segment_text(
         self,
@@ -143,8 +143,8 @@ class SAMEngine:
                 float(boxes.conf[i].item()) if boxes is not None and boxes.conf is not None else 1.0
             )
 
-            obb = mask_to_obb(mask, img_w, img_h)
-            if obb is None:
+            quad = mask_to_quad(mask, img_w, img_h)
+            if quad is None:
                 continue
             poly = mask_to_polygon(mask, img_w, img_h, polygon_epsilon)
             mb = mask_to_binary_image(mask)
@@ -155,7 +155,7 @@ class SAMEngine:
             if is_over:
                 skipped += 1
                 continue
-            new_labels.append((class_id, obb, poly, mb, conf))
+            new_labels.append((class_id, quad, poly, mb, conf))
             added += 1
 
         return new_labels, added, skipped, new_classes
@@ -261,10 +261,10 @@ class SAMEngine:
         if fallback_to_box:
             if abs(bx2 - bx1) < 4 or abs(by2 - by1) < 4:
                 return None, "Selection box too small"
-            obb = box_to_obb(bx1, by1, bx2, by2, img_w, img_h)
-            if obb is None:
+            quad = box_to_quad(bx1, by1, bx2, by2, img_w, img_h)
+            if quad is None:
                 return None, "Selection box too small"
-            poly = obb.copy()
+            poly = quad.copy()
             mb = polygon_to_mask(poly, img_w, img_h)
             is_over, oidx, oratio = check_mask_overlap(
                 mb, existing_labels, img_w, img_h, overlap_threshold
@@ -274,6 +274,6 @@ class SAMEngine:
                     None,
                     f"Overlaps with annotation {oidx + 1} ({oratio * 100:.0f}%)",
                 )
-            return (class_id, obb, poly, mb, 1.0), "Box annotation created (fallback)"
+            return (class_id, quad, poly, mb, 1.0), "Box annotation created (fallback)"
 
         return None, "SAM did not detect any object"

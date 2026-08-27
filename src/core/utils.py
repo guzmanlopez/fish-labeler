@@ -1,8 +1,8 @@
 """
 Utility functions — preserves all original processing logic
-mask_to_obb, mask_to_polygon, mask_to_binary_image, polygon_to_mask,
-check_mask_overlap, box_to_obb, point_in_obb, find_clicked_label,
-obb_intersects_box, find_labels_in_box, create_coco_annotation, create_coco_dataset
+mask_to_quad, mask_to_polygon, mask_to_binary_image, polygon_to_mask,
+check_mask_overlap, box_to_quad, point_in_quad, find_clicked_label,
+quad_intersects_box, find_labels_in_box, create_coco_annotation, create_coco_dataset
 """
 
 import json
@@ -16,9 +16,8 @@ import numpy as np
 # ------------------------------------------------------------------
 
 
-def mask_to_obb(mask, img_width, img_height):
-    """Docstring for mask_to_obb."""
-    """Convert binary mask to OBB coordinates"""
+def mask_to_quad(mask, img_width, img_height):
+    """Convert binary mask to four normalized corner coordinates."""
     if hasattr(mask, "cpu"):
         mask = mask.cpu().numpy()
     mask = mask.astype(np.uint8)
@@ -151,13 +150,12 @@ def _label_overlap_mask(label, img_width, img_height):
 
 
 # ------------------------------------------------------------------
-# OBB geometry
+# Quadrilateral geometry
 # ------------------------------------------------------------------
 
 
-def box_to_obb(x1, y1, x2, y2, img_w, img_h):
-    """Docstring for box_to_obb."""
-    """Convert bounding box to axis-aligned OBB coordinates"""
+def box_to_quad(x1, y1, x2, y2, img_w, img_h):
+    """Convert a bounding box to four normalized corner coordinates."""
     if img_w <= 0 or img_h <= 0:
         return None
     box_x1 = max(0, min(img_w, min(x1, x2)))
@@ -181,25 +179,24 @@ def box_to_obb(x1, y1, x2, y2, img_w, img_h):
     return normalized_box
 
 
-def point_in_aabb(x, y, obb_coords, img_w, img_h):
-    """Check if point (x, y) is inside AABB derived from OBB."""
+def point_in_aabb(x, y, quad_coords, img_w, img_h):
+    """Check if point (x, y) is inside the quadrilateral's enclosing box."""
     points_x = []
     points_y = []
     for i in range(0, 8, 2):
-        points_x.append(int(obb_coords[i] * img_w))
-        points_y.append(int(obb_coords[i + 1] * img_h))
+        points_x.append(int(quad_coords[i] * img_w))
+        points_y.append(int(quad_coords[i + 1] * img_h))
     min_x, max_x = min(points_x), max(points_x)
     min_y, max_y = min(points_y), max(points_y)
     return min_x <= x <= max_x and min_y <= y <= max_y
 
 
-def point_in_obb(x, y, obb_coords, img_w, img_h):
-    """Docstring for point_in_obb."""
-    """Check if point (x, y) is inside OBB"""
+def point_in_quad(x, y, quad_coords, img_w, img_h):
+    """Check if point (x, y) is inside a four-corner polygon."""
     points = []
     for i in range(0, 8, 2):
-        px = int(obb_coords[i] * img_w)
-        py = int(obb_coords[i + 1] * img_h)
+        px = int(quad_coords[i] * img_w)
+        py = int(quad_coords[i + 1] * img_h)
         points.append([px, py])
     polygon = np.array(points, dtype=np.int32)
     result = cv2.pointPolygonTest(polygon, (float(x), float(y)), False)
@@ -212,26 +209,25 @@ def find_clicked_label(x, y, labels, img_w, img_h):
     clicked_indices = []
     for idx, label in enumerate(labels):
         coords = label[1]
-        if point_in_obb(x, y, coords, img_w, img_h):
+        if point_in_quad(x, y, coords, img_w, img_h):
             clicked_indices.append(idx)
     if clicked_indices:
         return clicked_indices[0]
     return None
 
 
-def obb_intersects_box(obb_coords, box_x1, box_y1, box_x2, box_y2, img_w, img_h):
-    """Docstring for obb_intersects_box."""
-    """Check if OBB intersects or is contained within bounding box"""
-    obb_points = []
+def quad_intersects_box(quad_coords, box_x1, box_y1, box_x2, box_y2, img_w, img_h):
+    """Check if a quadrilateral intersects or is contained within a bounding box."""
+    quad_points = []
     for i in range(0, 8, 2):
-        px = obb_coords[i] * img_w
-        py = obb_coords[i + 1] * img_h
-        obb_points.append((px, py))
-    center_x = sum(p[0] for p in obb_points) / 4
-    center_y = sum(p[1] for p in obb_points) / 4
+        px = quad_coords[i] * img_w
+        py = quad_coords[i + 1] * img_h
+        quad_points.append((px, py))
+    center_x = sum(p[0] for p in quad_points) / 4
+    center_y = sum(p[1] for p in quad_points) / 4
     if box_x1 <= center_x <= box_x2 and box_y1 <= center_y <= box_y2:
         return True
-    for px, py in obb_points:
+    for px, py in quad_points:
         if box_x1 <= px <= box_x2 and box_y1 <= py <= box_y2:
             return True
     return False
@@ -245,9 +241,57 @@ def find_labels_in_box(x1, y1, x2, y2, labels, img_w, img_h):
     found_indices = []
     for idx, label in enumerate(labels):
         coords = label[1]
-        if obb_intersects_box(coords, box_x1, box_y1, box_x2, box_y2, img_w, img_h):
+        if quad_intersects_box(coords, box_x1, box_y1, box_x2, box_y2, img_w, img_h):
             found_indices.append(idx)
     return found_indices
+
+
+def remove_labels_in_box(x1, y1, x2, y2, labels, img_w, img_h):
+    """Return labels whose bounding quadrilaterals do not intersect a selection box."""
+    indices_to_remove = set(find_labels_in_box(x1, y1, x2, y2, labels, img_w, img_h))
+    return [label for index, label in enumerate(labels) if index not in indices_to_remove]
+
+
+def merge_segmentation_labels(labels, img_w, img_h, epsilon_ratio=0.005):
+    """Return one label containing the union of the supplied segmentation masks."""
+    if not labels or img_w <= 0 or img_h <= 0:
+        return None
+
+    merged_mask = _union_label_masks(labels, img_w, img_h)
+
+    polygon = mask_to_polygon(merged_mask, img_w, img_h, epsilon_ratio)
+    quad = mask_to_quad(merged_mask, img_w, img_h)
+    if polygon is None or quad is None:
+        return None
+
+    class_id = labels[0][0]
+    scores = [label[4] for label in labels if len(label) > 4 and label[4] is not None]
+    merged_label = (class_id, quad, polygon, merged_mask, max(scores) if scores else None)
+    track_ids = [label[5] for label in labels if len(label) > 5 and label[5] is not None]
+    if track_ids and len(track_ids) == len(labels) and len(set(track_ids)) == 1:
+        merged_label += (track_ids[0],)
+    return merged_label
+
+
+def _union_label_masks(labels, img_w, img_h):
+    """Return the binary union of the masks or polygons in a label sequence."""
+    merged_mask = np.zeros((img_h, img_w), dtype=np.uint8)
+    for label in labels:
+        mask = _label_mask_for_merge(label, img_w, img_h)
+        if mask is not None:
+            merged_mask = cv2.bitwise_or(merged_mask, mask)
+    return merged_mask
+
+
+def _label_mask_for_merge(label, img_w, img_h):
+    """Return one label's mask at the requested image dimensions."""
+    mask = label[3] if len(label) > 3 and label[3] is not None else None
+    if mask is None:
+        polygon = label[2] if len(label) > 2 and label[2] else label[1]
+        if not polygon:
+            return None
+        mask = polygon_to_mask(polygon, img_w, img_h)
+    return _normalize_overlap_mask(mask, img_w, img_h)
 
 
 # ------------------------------------------------------------------

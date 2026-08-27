@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from core.sam_engine import DEFAULT_SAM_CONF
 from core.state import LabelingState
+from segmentation.sam_engine import DEFAULT_SAM_CONF
 
 
 def test_labeling_state_init():
@@ -14,7 +14,7 @@ def test_labeling_state_init():
     assert state.current_image is None
     assert state.classes == ["fish"]
     assert state.class_thresholds == {"fish": DEFAULT_SAM_CONF}
-    assert state.mask_opacity == 0.62
+    assert state.mask_opacity == 0.30
     assert state.positive_prompt_points == []
     assert state.negative_prompt_points == []
     assert state.point_prompt_target == "positive"
@@ -43,7 +43,7 @@ def test_labeling_state_reset():
     assert state.current_labels == []
     assert state.current_image_path is None
     assert state.current_image is None
-    assert state.mask_opacity == 0.62
+    assert state.mask_opacity == 0.30
     assert state.positive_prompt_points == []
     assert state.negative_prompt_points == []
     assert state.keep_positive_points_across_frames is False

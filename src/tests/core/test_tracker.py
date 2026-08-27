@@ -1,12 +1,13 @@
 """Tests for the offline tracklet tracker."""
 
-from core.tracker import TrackingConfig, run_offline_tracker
+from tracker import offline_tracker
+from tracker.offline_tracker import DetectionRecord, TrackingConfig, Tracklet, run_offline_tracker
 
 
 def make_box(class_id, x1, y1, x2, y2, score=0.9):
-    """Create a label tuple using axis-aligned OBB coordinates for tracker tests."""
-    obb = [x1, y1, x2, y1, x2, y2, x1, y2]
-    return (class_id, obb, obb, None, score)
+    """Create a label tuple using axis-aligned quadrilateral coordinates."""
+    quad = [x1, y1, x2, y1, x2, y2, x1, y2]
+    return (class_id, quad, quad, None, score)
 
 
 def test_offline_tracker_stitches_tracklets_across_small_gaps():
@@ -58,7 +59,7 @@ def test_offline_tracker_keeps_distant_objects_separate():
 
 
 def test_offline_tracker_skips_malformed_boxes_without_crashing():
-    """Malformed OBB arrays should be ignored instead of raising index errors."""
+    """Malformed quadrilateral arrays should be ignored instead of raising errors."""
     frames = [
         [(0, [0.1, 0.1, 0.2, 0.1, 0.2, 0.2, 0.1], [0.1, 0.1], None, 0.9)],
         [make_box(0, 0.12, 0.10, 0.22, 0.20)],
@@ -68,3 +69,36 @@ def test_offline_tracker_skips_malformed_boxes_without_crashing():
 
     assert result.frame_track_ids[0] == [None]
     assert result.frame_track_ids[1][0] == 1
+
+
+def test_stitch_tracklets_handles_crossing_simultaneous_merge_indices(monkeypatch):
+    """All selected pairs must be read before replacing their source tracklets."""
+    tracklets = [
+        Tracklet(
+            detections=[
+                DetectionRecord(
+                    frame_index=index,
+                    detection_index=0,
+                    class_id=0,
+                    confidence=0.9,
+                    bbox=(0.1, 0.1, 0.2, 0.2),
+                    center=(0.15, 0.15),
+                    width=0.1,
+                    height=0.1,
+                    aspect_ratio=1.0,
+                    area=0.01,
+                )
+            ]
+        )
+        for index in range(4)
+    ]
+    monkeypatch.setattr(
+        offline_tracker,
+        "_hungarian",
+        lambda cost_matrix: [(0, 3), (1, 2)] if len(cost_matrix) == 4 else [],
+    )
+    monkeypatch.setattr(offline_tracker, "_tracklet_stitch_cost", lambda *_: (True, 0.0))
+
+    stitched = offline_tracker._stitch_tracklets(tracklets, TrackingConfig())
+
+    assert [len(tracklet.detections) for tracklet in stitched] == [2, 2]

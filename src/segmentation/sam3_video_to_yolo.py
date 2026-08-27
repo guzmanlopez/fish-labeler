@@ -13,7 +13,7 @@ frame, and writes a YOLO-seg style dataset layout:
         run_config.json
 
 Example:
-    fish-labeler video \
+    fish-labeler sam3video \
         --video /path/to/video.mp4 \
         --output-dir vessel-trip-01 \
         --classes fish tuna shark \
@@ -37,11 +37,18 @@ from rich.logging import RichHandler
 from tqdm.auto import tqdm
 
 from core.io_manager import resolve_output_folder
-from core.sam_engine import DEFAULT_MODEL_PATH
 from core.video_io import VideoHandler, YOLOExporter
+from segmentation.sam_engine import DEFAULT_MODEL_PATH
 
 LOG = logging.getLogger(__name__)
 CONSOLE = Console()
+DEFAULT_CLASSES = [
+    "fish",
+    "swordfish",
+    "shark",
+    "stingray",
+    "sea turtle",
+]
 
 
 def configure_logging(verbose: bool) -> None:
@@ -79,11 +86,8 @@ def str2bool(value: str) -> bool:
     raise argparse.ArgumentTypeError(f"Invalid boolean value: {value}")
 
 
-def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    """Docstring for parse_args."""
-    parser = argparse.ArgumentParser(
-        description="Run SAM3.1 text-prompt segmentation on sampled video frames and export YOLO-seg labels."
-    )
+def add_video_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add video workflow parameters to an argparse parser."""
     parser.add_argument("--video", type=Path, required=True, help="Path to the input video file.")
     parser.add_argument(
         "--output-dir",
@@ -95,15 +99,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--classes",
         nargs="+",
         required=False,
-        default=[
-            "fish",
-            "swordfish",
-            "tuna",
-            "shark",
-            "stingray",
-            "sea turtle",
-            "person",
-        ],
+        default=DEFAULT_CLASSES,
         help="Text prompts to segment. You can pass repeated values or comma-separated values.",
     )
     parser.add_argument(
@@ -123,8 +119,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--frame-step",
         type=int,
-        default=12,
-        help="Process every N frames. For a 12 FPS video, use 12 to process one frame per second.",
+        default=6,
+        help="Process every N frames. Defaults to every 6 frames.",
     )
     parser.add_argument(
         "--sample-every-seconds",
@@ -139,10 +135,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Ultralytics device string, for example cuda:0 or cpu.",
     )
     parser.add_argument(
-        "--half",
-        type=str2bool,
-        default=True,
-        help="Enable FP16 if supported. Defaults to automatic selection.",
+        "--quantize",
+        type=int,
+        choices=(16, 32),
+        default=16,
+        help="Inference precision: 16 for FP16 or 32 for FP32. Defaults to FP16.",
     )
     parser.add_argument(
         "--overwrite-frames",
@@ -160,6 +157,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Enable debug logging.",
     )
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse and validate standalone video workflow arguments."""
+    parser = argparse.ArgumentParser(
+        description="Run SAM3.1 text-prompt segmentation on sampled video frames and export YOLO-seg labels."
+    )
+    add_video_arguments(parser)
     args = parser.parse_args(argv)
     args.classes = parse_prompt_classes(args.classes)
     if not args.classes:
@@ -173,23 +178,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
-def resolve_half_precision(device: str | None, requested_half: bool | None) -> bool:
-    """Docstring for resolve_half_precision."""
-    if requested_half is not None:
-        if requested_half and device == "cpu":
-            LOG.warning("FP16 requested on CPU; disabling half precision.")
-            return False
-        return requested_half
-
-    if device == "cpu":
-        return False
-
-    try:
-        import torch
-
-        return torch.cuda.is_available()
-    except ImportError:
-        return False
+def resolve_quantize(device: str | None, requested_quantize: int) -> int:
+    """Return a supported precision, falling back to FP32 for explicit CPU runs."""
+    if requested_quantize == 16 and device == "cpu":
+        LOG.warning("FP16 requested on CPU; using FP32 instead.")
+        return 32
+    return requested_quantize
 
 
 def build_predictor(model_path: Path, args: argparse.Namespace):
@@ -203,7 +197,7 @@ def build_predictor(model_path: Path, args: argparse.Namespace):
         "mode": "predict",
         "model": str(model_path),
         "imgsz": args.imgsz,
-        "half": resolve_half_precision(args.device, args.half),
+        "quantize": resolve_quantize(args.device, args.quantize),
         "save": False,
         "verbose": False,
         "batch": 1,
@@ -276,8 +270,40 @@ def polygon_from_mask(
     return [[float(x / image_width), float(y / image_height)] for x, y in points]
 
 
+def bbox_iou(left: Sequence[float], right: Sequence[float]) -> float:
+    """Return intersection-over-union for two ``[x1, y1, x2, y2]`` boxes."""
+    intersection_width = max(0.0, min(left[2], right[2]) - max(left[0], right[0]))
+    intersection_height = max(0.0, min(left[3], right[3]) - max(left[1], right[1]))
+    intersection_area = intersection_width * intersection_height
+    if not intersection_area:
+        return 0.0
+    left_area = max(0.0, left[2] - left[0]) * max(0.0, left[3] - left[1])
+    right_area = max(0.0, right[2] - right[0]) * max(0.0, right[3] - right[1])
+    return intersection_area / (left_area + right_area - intersection_area)
+
+
+def prioritize_fish_detections(detections: list[dict], overlap_threshold: float) -> list[dict]:
+    """Keep fish detections and suppress non-fish detections that overlap them."""
+    fish_detections = [
+        detection for detection in detections if detection["class_name"].casefold() == "fish"
+    ]
+    if not fish_detections:
+        return detections
+    return [
+        detection
+        for detection in detections
+        if detection in fish_detections
+        or all(
+            bbox_iou(detection["bbox_xyxy"], fish["bbox_xyxy"]) < overlap_threshold
+            for fish in fish_detections
+        )
+    ]
+
+
 # complexipy: ignore
-def result_to_annotation(result, frame_idx: int, class_prompts: Sequence[str]) -> dict:
+def result_to_annotation(
+    result, frame_idx: int, class_prompts: Sequence[str], overlap_threshold: float
+) -> dict:
     """Docstring for result_to_annotation."""
     image_height, image_width = result.orig_shape
     annotation = {
@@ -326,6 +352,9 @@ def result_to_annotation(result, frame_idx: int, class_prompts: Sequence[str]) -
             "track_id": None,
         })
 
+    annotation["detections"] = prioritize_fish_detections(
+        annotation["detections"], overlap_threshold
+    )
     return annotation
 
 
@@ -347,7 +376,7 @@ def write_run_config(
         "iou": args.iou,
         "imgsz": args.imgsz,
         "device": args.device,
-        "half": resolve_half_precision(args.device, args.half),
+        "quantize": resolve_quantize(args.device, args.quantize),
         "fps": fps,
         "total_frames": total_frames,
         "sampled_frames": sampled_frames,
@@ -615,6 +644,8 @@ def run(args: argparse.Namespace) -> Path:
     annotations: dict[int, dict] = {}
     total_detections = 0
     frames_with_detections = 0
+    processed_indices: list[int] = []
+    interrupted = False
 
     progress = tqdm(total=len(sampled_indices), desc="Segmenting video frames")
     try:
@@ -627,13 +658,20 @@ def run(args: argparse.Namespace) -> Path:
             )
             predictor.set_image(str(frame_path))
             results = predictor(text=args.classes)
-            annotation = result_to_annotation(results[0], frame_idx, args.classes)
+            annotation = result_to_annotation(results[0], frame_idx, args.classes, args.iou)
             annotations[frame_idx] = annotation
             detection_count = len(annotation["detections"])
             total_detections += detection_count
             if detection_count > 0:
                 frames_with_detections += 1
+            processed_indices.append(frame_idx)
             progress.update(1)
+    except KeyboardInterrupt:
+        interrupted = True
+        LOG.warning(
+            "Interrupt received. Saving results for %d completed frame(s)...",
+            len(processed_indices),
+        )
     finally:
         progress.close()
         video_handler.release()
@@ -649,7 +687,7 @@ def run(args: argparse.Namespace) -> Path:
         video_path=args.video.resolve(),
         video_info=video_info,
         frame_step=frame_step,
-        sampled_indices=sampled_indices,
+        sampled_indices=processed_indices,
         sample_every_seconds=args.sample_every_seconds,
         frames_with_detections=frames_with_detections,
         total_detections=total_detections,
@@ -663,12 +701,16 @@ def run(args: argparse.Namespace) -> Path:
         args=args,
         fps=video_info.fps,
         total_frames=video_info.total_frames,
-        sampled_frames=len(sampled_indices),
+        sampled_frames=len(processed_indices),
         frame_step=frame_step,
         total_detections=total_detections,
     )
 
-    empty_label_files = len(sampled_indices) - frames_with_detections
+    empty_label_files = len(processed_indices) - frames_with_detections
+    if interrupted:
+        LOG.warning("Partial video export saved to %s.", output_dir)
+        raise KeyboardInterrupt
+
     LOG.info("Export complete: %s", output_dir)
     LOG.info("Sampled frames: %d", len(sampled_indices))
     LOG.info("Frames with detections: %d", frames_with_detections)
@@ -677,9 +719,8 @@ def run(args: argparse.Namespace) -> Path:
     return output_dir
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Docstring for main."""
-    args = parse_args(argv)
+def run_workflow(args: argparse.Namespace) -> int:
+    """Run parsed video workflow arguments and return a command exit code."""
     configure_logging(args.verbose)
     try:
         run(args)
@@ -690,6 +731,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         LOG.error("Export failed: %s", exc, exc_info=args.verbose)
         return 1
     return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the standalone video workflow command."""
+    return run_workflow(parse_args(argv))
 
 
 if __name__ == "__main__":
