@@ -396,8 +396,40 @@ def test_load_folder_recognizes_dataset_run_and_loads_annotations(monkeypatch, q
     assert window.output_input.text() == "sample-run"
     assert window.state.output_folder == run_folder
     assert window.state.image_list == [image_path]
-    assert window.state.classes == ["fish", "swordfish"]
+    assert window.state.classes == ["fish", "swordfish", "person", "buoy"]
     assert len(window.state.current_labels) == 1
+
+
+def test_load_folder_preserves_persisted_classes_beyond_dataset_mapping(
+    monkeypatch, qtbot, tmp_path
+):
+    """Dataset loading should keep newly added classes available across app opens."""
+    window = build_window(monkeypatch, qtbot)
+    run_folder = tmp_path / "sample-run"
+    image_folder = run_folder / "images"
+    image_folder.mkdir(parents=True)
+    (run_folder / "labels").mkdir()
+    image_path = image_folder / "frame_0001.jpg"
+    image_path.touch()
+    (run_folder / "labels" / "frame_0001.txt").write_text(
+        "4 0.1 0.1 0.9 0.1 0.9 0.9 0.1 0.9\n", encoding="utf-8"
+    )
+    (run_folder / "run_config.json").write_text(
+        '{"classes": ["fish", "person", "buoy"]}', encoding="utf-8"
+    )
+    image = np.zeros((32, 48, 3), dtype=np.uint8)
+    monkeypatch.setattr("ui.main_window.cv2.imread", lambda path: image.copy())
+    monkeypatch.setattr("ui.main_window.load_progress", lambda folder: 0)
+    monkeypatch.setattr("ui.main_window.save_config", lambda *args: None)
+    monkeypatch.setattr("ui.main_window.persist_classes", lambda classes: None)
+
+    window.state.classes = ["fish", "person", "buoy", "shark", "YFT"]
+    window.folder_input.setText(str(run_folder))
+    window._load_folder()
+
+    assert window.state.classes == ["fish", "person", "buoy", "shark", "YFT"]
+    assert window.state.current_labels[0][0] == 4
+    assert window.label_list.item(0).text().endswith("YFT")
 
 
 def test_load_folder_skips_unannotated_saved_progress(monkeypatch, qtbot, tmp_path):

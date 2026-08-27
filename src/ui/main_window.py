@@ -1494,7 +1494,12 @@ class MainWindow(QMainWindow):
             self.output_input.setText(op)
             dataset_classes = load_dataset_classes(dataset_folder)
             if dataset_classes:
-                self.state.classes = dataset_classes
+                self.state.classes = dataset_classes + [
+                    class_name
+                    for class_name in self.state.classes
+                    if class_name not in dataset_classes
+                ]
+                persist_classes(self.state.classes)
                 self._refresh_class_combos()
         else:
             self.state.output_folder = resolve_output_folder(op)
